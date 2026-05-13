@@ -16,6 +16,8 @@
 
 	<properties>
 		<java.version>21</java.version>
+		<sonar.organization>jairobonilla2004</sonar.organization>
+		<sonar.projectKey>JairoBonilla2004_Aseguramiento-QA-PROJECT</sonar.projectKey>
 		<jjwt.version>0.12.6</jjwt.version>
 		<springdoc.version>2.6.0</springdoc.version>
 		<cloudinary.version>1.39.0</cloudinary.version>
