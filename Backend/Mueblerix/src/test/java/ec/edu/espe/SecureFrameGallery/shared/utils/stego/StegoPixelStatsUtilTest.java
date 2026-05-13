@@ -3,117 +3,71 @@ package ec.edu.espe.SecureFrameGallery.shared.utils.stego;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.awt.image.BufferedImage;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("StegoPixelStatsUtil — estadísticas de píxeles para detección LSB")
 class StegoPixelStatsUtilTest {
 
-    // ── Entropía de Shannon ───────────────────────────────────────────────────
-
     @Test
-    @DisplayName("Entropía de distribución uniforme es máxima (~1.0)")
-    void uniformDistributionHasMaxEntropy() {
-        // Todos los valores de LSB distribuidos uniformemente
-        int[] uniformLsb = new int[256];
-        for (int i = 0; i < 256; i++) uniformLsb[i] = 100;
-
-        double entropy = StegoPixelStatsUtil.shannonEntropy(uniformLsb);
-        assertTrue(entropy > 0.99, "Distribución uniforme debe tener entropía cercana a 1.0, fue: " + entropy);
+    @DisplayName("pickStride selecciona stride según tamaño")
+    void pickStrideSelectsExpectedValues() {
+        assertEquals(1, StegoPixelStatsUtil.pickStride(1000, 1000)); // 1,000,000 px
+        assertEquals(2, StegoPixelStatsUtil.pickStride(2000, 1200)); // 2,400,000 px
+        assertEquals(3, StegoPixelStatsUtil.pickStride(4000, 2500)); // 10,000,000 px
     }
 
     @Test
-    @DisplayName("Entropía de distribución constante es 0")
-    void constantDistributionHasZeroEntropy() {
-        // Solo un valor presente
-        int[] constantLsb = new int[256];
-        constantLsb[0] = 1000;
+    @DisplayName("computeSmoothRatio en imagen uniforme es alto")
+    void smoothRatioIsHighOnUniformImage() {
+        BufferedImage uniform = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
+        for (int x = 0; x < 64; x++)
+            for (int y = 0; y < 64; y++)
+                uniform.setRGB(x, y, 0x777777);
 
-        double entropy = StegoPixelStatsUtil.shannonEntropy(constantLsb);
-        assertEquals(0.0, entropy, 0.001);
+        double ratio = StegoPixelStatsUtil.computeSmoothRatio(uniform, 0);
+        assertTrue(ratio > 0.95, "Smooth ratio esperado alto, fue: " + ratio);
     }
 
     @Test
-    @DisplayName("Entropía está siempre entre 0 y 1")
-    void entropyIsBetweenZeroAndOne() {
-        int[] randomish = new int[]{500, 200, 300, 0, 100, 400, 150, 250};
-        double entropy = StegoPixelStatsUtil.shannonEntropy(randomish);
-        assertTrue(entropy >= 0.0 && entropy <= 1.0,
-            "Entropía fuera de rango [0,1]: " + entropy);
-    }
+    @DisplayName("computeSmoothRatio en checkerboard es bajo")
+    void smoothRatioIsLowOnCheckerboard() {
+        BufferedImage checker = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
+        for (int x = 0; x < 64; x++)
+            for (int y = 0; y < 64; y++)
+                checker.setRGB(x, y, ((x + y) % 2 == 0) ? 0x000000 : 0xFFFFFF);
 
-    // ── Chi-square ────────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("Chi-square de distribución uniforme retorna p-value alto")
-    void chiSquareOfUniformDistributionReturnsHighPValue() {
-        int[] uniform = new int[256];
-        for (int i = 0; i < 256; i++) uniform[i] = 100;
-
-        double pValue = StegoPixelStatsUtil.chiSquarePValue(uniform);
-        assertTrue(pValue > 0.80,
-            "Distribución uniforme (típica en esteganografía) debe tener p-value alto, fue: " + pValue);
+        double ratio = StegoPixelStatsUtil.computeSmoothRatio(checker, 0);
+        assertTrue(ratio < 0.10, "Smooth ratio esperado bajo, fue: " + ratio);
     }
 
     @Test
-    @DisplayName("Chi-square de imagen natural retorna p-value bajo")
-    void chiSquareOfNaturalImageReturnsLowPValue() {
-        // Distribución bimodal — típica de imagen natural
-        int[] natural = new int[256];
-        natural[10] = 800;
-        natural[200] = 600;
-        natural[128] = 100;
+    @DisplayName("measureLsbTransitionRate es ~0 en imagen uniforme")
+    void transitionRateIsLowOnUniformImage() {
+        BufferedImage uniform = new BufferedImage(32, 32, BufferedImage.TYPE_INT_RGB);
+        for (int x = 0; x < 32; x++)
+            for (int y = 0; y < 32; y++)
+                uniform.setRGB(x, y, 0x222222);
 
-        double pValue = StegoPixelStatsUtil.chiSquarePValue(natural);
-        assertTrue(pValue < 0.50,
-            "Distribución bimodal (imagen natural) debe tener p-value bajo, fue: " + pValue);
-    }
-
-    // ── Transiciones secuenciales ─────────────────────────────────────────────
-
-    @Test
-    @DisplayName("Alta tasa de transición 0→1 y 1→0 indica LSB aleatorizado")
-    void highTransitionRateIndicatesRandomizedLsb() {
-        // Alternancia perfecta 0,1,0,1,... = esteganografía típica
-        int[] alternating = new int[1000];
-        for (int i = 0; i < 1000; i++) alternating[i] = i % 2;
-
-        double transitionRate = StegoPixelStatsUtil.sequentialTransitionRate(alternating);
-        assertTrue(transitionRate > 0.90,
-            "Alternancia perfecta debe dar tasa de transición > 0.90, fue: " + transitionRate);
+        StegoPixelStatsUtil.TransitionRate r = StegoPixelStatsUtil.measureLsbTransitionRate(uniform, 0, 32, false, 0);
+        assertTrue(r.samples() > 0);
+        assertTrue(r.rate() < 0.05, "Tasa de transición esperada baja, fue: " + r.rate());
     }
 
     @Test
-    @DisplayName("Baja tasa de transición indica imagen natural (LSBs correlacionados)")
-    void lowTransitionRateIndicatesNaturalImage() {
-        // Bloques largos del mismo bit — típico de imagen natural uniforme
-        int[] blocky = new int[1000];
-        for (int i = 0; i < 500; i++) blocky[i] = 0;
-        for (int i = 500; i < 1000; i++) blocky[i] = 1;
+    @DisplayName("measureLsbTransitionRate es alta en patrón alternante")
+    void transitionRateIsHighOnAlternatingPattern() {
+        BufferedImage alt = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
+        for (int x = 0; x < 64; x++) {
+            for (int y = 0; y < 64; y++) {
+                int v = ((x + y) % 2 == 0) ? 0x000000 : 0x010101; // LSB alternante
+                alt.setRGB(x, y, v);
+            }
+        }
 
-        double transitionRate = StegoPixelStatsUtil.sequentialTransitionRate(blocky);
-        assertTrue(transitionRate < 0.10,
-            "Bloques largos deben dar tasa de transición < 0.10, fue: " + transitionRate);
-    }
-
-    // ── Casos borde ───────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("Array vacío en shannonEntropy retorna 0 sin excepción")
-    void emptyArrayShannonEntropyReturnsZero() {
-        assertDoesNotThrow(() -> assertEquals(0.0, StegoPixelStatsUtil.shannonEntropy(new int[]{})));
-    }
-
-    @Test
-    @DisplayName("Null en chiSquarePValue retorna 0 sin excepción")
-    void nullChiSquarePValueReturnsZero() {
-        assertDoesNotThrow(() -> assertEquals(0.0, StegoPixelStatsUtil.chiSquarePValue(null), 0.001));
-    }
-
-    @Test
-    @DisplayName("Array de un elemento en transitionRate retorna 0")
-    void singleElementTransitionRateReturnsZero() {
-        assertDoesNotThrow(() ->
-            assertEquals(0.0, StegoPixelStatsUtil.sequentialTransitionRate(new int[]{1}), 0.001)
-        );
+        StegoPixelStatsUtil.TransitionRate r = StegoPixelStatsUtil.measureLsbTransitionRate(alt, 0, 64, false, 0);
+        assertTrue(r.samples() > 0);
+        assertTrue(r.rate() > 0.30, "Tasa de transición esperada alta, fue: " + r.rate());
     }
 }

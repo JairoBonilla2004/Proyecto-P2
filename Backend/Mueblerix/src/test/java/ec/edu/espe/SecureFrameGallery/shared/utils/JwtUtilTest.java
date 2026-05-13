@@ -1,12 +1,9 @@
 package ec.edu.espe.SecureFrameGallery.shared.utils;
 
-import ec.edu.espe.SecureFrameGallery.modules.auth.entities.User;
 import ec.edu.espe.SecureFrameGallery.shared.enums.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -14,7 +11,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class JwtUtilTest {
 
     private JwtUtil jwtUtil;
-    private User testUser;
+    private final String email = "test@espe.edu.ec";
+    private final String role = Role.ROLE_USER.name();
 
     @BeforeEach
     void setUp() {
@@ -22,13 +20,6 @@ class JwtUtilTest {
             "test-secret-key-must-be-at-least-256-bits-long-for-hs256-algorithm",
             3600000L
         );
-
-        testUser = new User();
-        testUser.setId(UUID.randomUUID());
-        testUser.setEmail("test@espe.edu.ec");
-        testUser.setUsername("tester");
-        testUser.setRole(Role.USER);
-        testUser.setEnabled(true);
     }
 
     // ── Generación ────────────────────────────────────────────────────────────
@@ -36,7 +27,7 @@ class JwtUtilTest {
     @Test
     @DisplayName("Genera token no nulo para usuario válido")
     void generateTokenReturnsNonNullString() {
-        String token = jwtUtil.generateToken(testUser);
+        String token = jwtUtil.generateToken(email, role);
         assertNotNull(token);
         assertFalse(token.isBlank());
     }
@@ -44,7 +35,7 @@ class JwtUtilTest {
     @Test
     @DisplayName("Token tiene formato JWT de tres partes separadas por punto")
     void tokenHasThreeParts() {
-        String token = jwtUtil.generateToken(testUser);
+        String token = jwtUtil.generateToken(email, role);
         String[] parts = token.split("\\.");
         assertEquals(3, parts.length, "JWT debe tener header.payload.signature");
     }
@@ -52,9 +43,9 @@ class JwtUtilTest {
     @Test
     @DisplayName("Dos tokens generados para el mismo usuario son distintos")
     void twoTokensForSameUserAreDifferent() {
-        String token1 = jwtUtil.generateToken(testUser);
-        String token2 = jwtUtil.generateToken(testUser);
-        assertNotEquals(token1, token2, "Cada token debe tener iat distinto");
+        String token1 = jwtUtil.generateToken(email, role);
+        String token2 = jwtUtil.generateToken(email, role);
+        assertNotEquals(token1, token2, "Cada token debe ser único (ej. jti distinto)");
     }
 
     // ── Extracción de claims ──────────────────────────────────────────────────
@@ -62,17 +53,17 @@ class JwtUtilTest {
     @Test
     @DisplayName("Extrae el email del subject correctamente")
     void extractsEmailFromSubject() {
-        String token = jwtUtil.generateToken(testUser);
+        String token = jwtUtil.generateToken(email, role);
         String email = jwtUtil.extractEmail(token);
-        assertEquals(testUser.getEmail(), email);
+        assertEquals(this.email, email);
     }
 
     @Test
     @DisplayName("Extrae el rol del token correctamente")
     void extractsRoleFromToken() {
-        String token = jwtUtil.generateToken(testUser);
+        String token = jwtUtil.generateToken(email, role);
         String role = jwtUtil.extractRole(token);
-        assertEquals(Role.USER.name(), role);
+        assertEquals(this.role, role);
     }
 
     // ── Validación ────────────────────────────────────────────────────────────
@@ -80,8 +71,8 @@ class JwtUtilTest {
     @Test
     @DisplayName("Token recién generado es válido")
     void freshTokenIsValid() {
-        String token = jwtUtil.generateToken(testUser);
-        assertTrue(jwtUtil.isTokenValid(token, testUser));
+        String token = jwtUtil.generateToken(email, role);
+        assertTrue(jwtUtil.isValid(token));
     }
 
     @Test
@@ -91,8 +82,8 @@ class JwtUtilTest {
             "completely-different-secret-key-256-bits-long-for-testing-purposes",
             3600000L
         );
-        String foreignToken = otherUtil.generateToken(testUser);
-        assertFalse(jwtUtil.isTokenValid(foreignToken, testUser));
+        String foreignToken = otherUtil.generateToken(email, role);
+        assertFalse(jwtUtil.isValid(foreignToken));
     }
 
     @Test
@@ -102,57 +93,33 @@ class JwtUtilTest {
             "test-secret-key-must-be-at-least-256-bits-long-for-hs256-algorithm",
             1L  // expira en 1ms
         );
-        String token = shortLivedUtil.generateToken(testUser);
+        String token = shortLivedUtil.generateToken(email, role);
 
         try { Thread.sleep(10); } catch (InterruptedException ignored) {}
 
-        assertFalse(shortLivedUtil.isTokenValid(token, testUser));
+        assertFalse(shortLivedUtil.isValid(token));
     }
 
     @Test
     @DisplayName("Token manipulado (payload alterado) es inválido")
     void tamperedTokenIsInvalid() {
-        String token = jwtUtil.generateToken(testUser);
+        String token = jwtUtil.generateToken(email, role);
         String[] parts = token.split("\\.");
         // Reemplaza el payload con uno falso en base64
         String tamperedToken = parts[0] + ".dGFtcGVyZWQ" + "." + parts[2];
-        assertFalse(jwtUtil.isTokenValid(tamperedToken, testUser));
+        assertFalse(jwtUtil.isValid(tamperedToken));
     }
 
     @Test
     @DisplayName("String vacío como token no lanza excepción")
     void emptyTokenDoesNotThrow() {
-        assertDoesNotThrow(() -> assertFalse(jwtUtil.isTokenValid("", testUser)));
+        assertDoesNotThrow(() -> assertFalse(jwtUtil.isValid("")));
     }
 
     @Test
-    @DisplayName("Token para usuario distinto no valida contra otro usuario")
-    void tokenDoesNotValidateForDifferentUser() {
-        User otherUser = new User();
-        otherUser.setId(UUID.randomUUID());
-        otherUser.setEmail("otro@espe.edu.ec");
-        otherUser.setUsername("otro");
-        otherUser.setRole(Role.USER);
-        otherUser.setEnabled(true);
-
-        String tokenForOriginal = jwtUtil.generateToken(testUser);
-        assertFalse(jwtUtil.isTokenValid(tokenForOriginal, otherUser));
-    }
-
-    // ── Claims de rol ────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("Token de SUPERVISOR contiene rol SUPERVISOR")
+    @DisplayName("Token de ROLE_SUPERVISOR contiene claim role correcto")
     void supervisorTokenContainsSupervisorRole() {
-        testUser.setRole(Role.SUPERVISOR);
-        String token = jwtUtil.generateToken(testUser);
-        assertEquals(Role.SUPERVISOR.name(), jwtUtil.extractRole(token));
-    }
-
-    @Test
-    @DisplayName("Token no expirado reporta isExpired como false")
-    void freshTokenIsNotExpired() {
-        String token = jwtUtil.generateToken(testUser);
-        assertFalse(jwtUtil.isTokenExpired(token));
+        String token = jwtUtil.generateToken(email, Role.ROLE_SUPERVISOR.name());
+        assertEquals(Role.ROLE_SUPERVISOR.name(), jwtUtil.extractRole(token));
     }
 }

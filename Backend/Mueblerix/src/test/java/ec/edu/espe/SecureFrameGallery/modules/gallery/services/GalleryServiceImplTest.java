@@ -6,9 +6,12 @@ import ec.edu.espe.SecureFrameGallery.modules.gallery.entities.Album;
 import ec.edu.espe.SecureFrameGallery.modules.gallery.repositories.AlbumRepository;
 import ec.edu.espe.SecureFrameGallery.modules.gallery.services.impl.GalleryServiceImpl;
 import ec.edu.espe.SecureFrameGallery.modules.auth.entities.User;
-import ec.edu.espe.SecureFrameGallery.modules.auth.repositories.UserRepository;
 import ec.edu.espe.SecureFrameGallery.shared.enums.AlbumStatus;
-import ec.edu.espe.SecureFrameGallery.shared.enums.Role;
+import ec.edu.espe.SecureFrameGallery.modules.gallery.repositories.ImageRepository;
+import ec.edu.espe.SecureFrameGallery.modules.steganography.repositories.QuarantineLogRepository;
+import ec.edu.espe.SecureFrameGallery.modules.steganography.services.ImageAnalyzer;
+import ec.edu.espe.SecureFrameGallery.modules.steganography.services.MetadataCleaner;
+import ec.edu.espe.SecureFrameGallery.shared.utils.MagicNumberUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,9 +19,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -33,28 +36,35 @@ class GalleryServiceImplTest {
     private AlbumRepository albumRepository;
 
     @Mock
-    private UserRepository userRepository;
+    private ImageRepository imageRepository;
+
+    @Mock
+    private QuarantineLogRepository quarantineLogRepository;
+
+    @Mock
+    private MagicNumberUtil magicNumberUtil;
+
+    @Mock
+    private ImageAnalyzer imageAnalyzer;
+
+    @Mock
+    private MetadataCleaner metadataCleaner;
+
+    @Mock
+    private CloudinaryStorageService cloudinaryStorageService;
 
     @InjectMocks
     private GalleryServiceImpl galleryService;
 
     private User owner;
-    private Album pendingAlbum;
 
     @BeforeEach
     void setUp() {
         owner = new User();
         owner.setId(UUID.randomUUID());
         owner.setEmail("foto@espe.edu.ec");
-        owner.setRole(Role.USER);
+        owner.setRole(ec.edu.espe.SecureFrameGallery.shared.enums.Role.ROLE_USER);
         owner.setEnabled(true);
-
-        pendingAlbum = new Album();
-        pendingAlbum.setId(UUID.randomUUID());
-        pendingAlbum.setTitle("Fotos del campus");
-        pendingAlbum.setApprovalStatus(AlbumStatus.PENDING_REVIEW);
-        pendingAlbum.setOwner(owner);
-        pendingAlbum.setPublic(true);
     }
 
     @Test
@@ -64,31 +74,23 @@ class GalleryServiceImplTest {
         dto.setTitle("Nuevo álbum");
         dto.setPublic(true);
 
-        when(userRepository.findByEmail(owner.getEmail())).thenReturn(Optional.of(owner));
         when(albumRepository.save(any(Album.class))).thenAnswer(inv -> {
             Album a = inv.getArgument(0);
             a.setId(UUID.randomUUID());
             return a;
         });
+        when(albumRepository.existsByOwnerAndTitleIgnoreCase(eq(owner), any())).thenReturn(false);
 
-        AlbumResponseDto result = galleryService.createAlbum(dto, owner.getEmail());
+        AlbumResponseDto result = galleryService.createAlbum(dto, owner);
 
         assertNotNull(result);
         assertEquals(AlbumStatus.PENDING_REVIEW, result.getApprovalStatus());
         verify(albumRepository).save(any(Album.class));
-    }
 
-    @Test
-    @DisplayName("Crear álbum falla si el usuario no existe")
-    void createAlbumFailsIfUserNotFound() {
-        AlbumCreateDto dto = new AlbumCreateDto();
-        dto.setTitle("Álbum huérfano");
-
-        when(userRepository.findByEmail("noexiste@espe.edu.ec")).thenReturn(Optional.empty());
-
-        assertThrows(RuntimeException.class,
-            () -> galleryService.createAlbum(dto, "noexiste@espe.edu.ec"));
-        verify(albumRepository, never()).save(any());
+        ArgumentCaptor<Album> captor = ArgumentCaptor.forClass(Album.class);
+        verify(albumRepository).save(captor.capture());
+        assertEquals(AlbumStatus.PENDING_REVIEW, captor.getValue().getApprovalStatus());
+        assertEquals(owner.getEmail(), captor.getValue().getOwner().getEmail());
     }
 
     @Test
@@ -104,7 +106,7 @@ class GalleryServiceImplTest {
         when(albumRepository.findByApprovalStatusAndIsPublicTrue(AlbumStatus.APPROVED))
             .thenReturn(List.of(approved));
 
-        List<AlbumResponseDto> results = galleryService.getPublicAlbums();
+        List<AlbumResponseDto> results = galleryService.getPublicApprovedAlbums();
 
         assertEquals(1, results.size());
         assertEquals(AlbumStatus.APPROVED, results.get(0).getApprovalStatus());
@@ -115,41 +117,6 @@ class GalleryServiceImplTest {
     void listPublicAlbumsReturnsEmptyWhenNoneApproved() {
         when(albumRepository.findByApprovalStatusAndIsPublicTrue(AlbumStatus.APPROVED))
             .thenReturn(List.of());
-        assertTrue(galleryService.getPublicAlbums().isEmpty());
-    }
-
-    @Test
-    @DisplayName("Supervisor aprueba álbum pendiente correctamente")
-    void supervisorApprovesAlbum() {
-        when(albumRepository.findById(pendingAlbum.getId())).thenReturn(Optional.of(pendingAlbum));
-        when(albumRepository.save(any(Album.class))).thenAnswer(inv -> inv.getArgument(0));
-        assertEquals(AlbumStatus.APPROVED, galleryService.approveAlbum(pendingAlbum.getId()).getApprovalStatus());
-    }
-
-    @Test
-    @DisplayName("Supervisor rechaza álbum pendiente correctamente")
-    void supervisorRejectsAlbum() {
-        when(albumRepository.findById(pendingAlbum.getId())).thenReturn(Optional.of(pendingAlbum));
-        when(albumRepository.save(any(Album.class))).thenAnswer(inv -> inv.getArgument(0));
-        assertEquals(AlbumStatus.REJECTED, galleryService.rejectAlbum(pendingAlbum.getId()).getApprovalStatus());
-    }
-
-    @Test
-    @DisplayName("Aprobar álbum inexistente lanza excepción")
-    void approveNonexistentAlbumThrows() {
-        UUID fakeId = UUID.randomUUID();
-        when(albumRepository.findById(fakeId)).thenReturn(Optional.empty());
-        assertThrows(RuntimeException.class, () -> galleryService.approveAlbum(fakeId));
-    }
-
-    @Test
-    @DisplayName("Álbum rechazado no aparece en listado público")
-    void rejectedAlbumDoesNotAppearInPublicList() {
-        when(albumRepository.findByApprovalStatusAndIsPublicTrue(AlbumStatus.APPROVED))
-            .thenReturn(List.of());
-
-        List<AlbumResponseDto> results = galleryService.getPublicAlbums();
-
-        assertTrue(results.stream().noneMatch(a -> a.getApprovalStatus() == AlbumStatus.REJECTED));
+        assertTrue(galleryService.getPublicApprovedAlbums().isEmpty());
     }
 }

@@ -2,106 +2,65 @@ package ec.edu.espe.SecureFrameGallery.shared.utils.stego;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+
+import java.awt.image.BufferedImage;
+import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("StegoImageTypeClassifier — clasificación de tipo de imagen para análisis")
 class StegoImageTypeClassifierTest {
 
-    // ── Clasificación por magic bytes ─────────────────────────────────────────
-
     @Test
-    @DisplayName("Clasifica JPEG correctamente")
-    void classifiesJpegCorrectly() {
-        byte[] jpeg = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0};
-        assertEquals("JPEG", StegoImageTypeClassifier.classify(jpeg));
+    @DisplayName("Null se clasifica como PHOTOGRAPHIC por defecto")
+    void nullClassifiesAsPhotographic() {
+        StegoImageTypeClassifier.Classification c = StegoImageTypeClassifier.classify(null, "image/png");
+        assertEquals(StegoImageTypeClassifier.ImageType.PHOTOGRAPHIC, c.type());
+        assertEquals(0, c.uniqueColors());
+        assertEquals(0, c.sampleCount());
     }
 
     @Test
-    @DisplayName("Clasifica PNG correctamente")
-    void classifiesPngCorrectly() {
-        byte[] png = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-        assertEquals("PNG", StegoImageTypeClassifier.classify(png));
+    @DisplayName("JPEG siempre se trata como PHOTOGRAPHIC (sin heurísticas)")
+    void jpegIsPhotographicByPolicy() {
+        BufferedImage img = new BufferedImage(32, 32, BufferedImage.TYPE_INT_RGB);
+        for (int x = 0; x < 32; x++)
+            for (int y = 0; y < 32; y++)
+                img.setRGB(x, y, (x ^ y) * 12345);
+
+        StegoImageTypeClassifier.Classification c = StegoImageTypeClassifier.classify(img, "image/jpeg");
+        assertEquals(StegoImageTypeClassifier.ImageType.PHOTOGRAPHIC, c.type());
+        assertEquals(0, c.sampleCount());
     }
 
     @Test
-    @DisplayName("Clasifica GIF87a correctamente")
-    void classifiesGif87aCorrectly() {
-        byte[] gif = {0x47, 0x49, 0x46, 0x38, 0x37, 0x61};
-        assertEquals("GIF", StegoImageTypeClassifier.classify(gif));
+    @DisplayName("Imagen con filas sólidas se clasifica como SYNTHETIC (PNG)")
+    void solidRowsClassifyAsSynthetic() {
+        BufferedImage img = new BufferedImage(40, 40, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < 40; y++) {
+            int rowColor = (y * 6) << 16;
+            for (int x = 0; x < 40; x++) {
+                img.setRGB(x, y, rowColor);
+            }
+        }
+
+        StegoImageTypeClassifier.Classification c = StegoImageTypeClassifier.classify(img, "image/png");
+        assertEquals(StegoImageTypeClassifier.ImageType.SYNTHETIC, c.type());
+        assertTrue(c.solidRowRatio() >= 0.15);
+        assertTrue(c.sampleCount() > 0);
     }
 
     @Test
-    @DisplayName("Clasifica GIF89a correctamente")
-    void classifiesGif89aCorrectly() {
-        byte[] gif = {0x47, 0x49, 0x46, 0x38, 0x39, 0x61};
-        assertEquals("GIF", StegoImageTypeClassifier.classify(gif));
-    }
+    @DisplayName("Imagen con muchos colores se clasifica como PHOTOGRAPHIC (PNG)")
+    void noisyImageClassifiesAsPhotographic() {
+        BufferedImage img = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
+        Random rng = new Random(123);
+        for (int x = 0; x < 64; x++)
+            for (int y = 0; y < 64; y++)
+                img.setRGB(x, y, rng.nextInt(0xFFFFFF));
 
-    @Test
-    @DisplayName("Clasifica WebP correctamente")
-    void classifiesWebPCorrectly() {
-        byte[] webp = {
-            0x52, 0x49, 0x46, 0x46,
-            0x00, 0x00, 0x00, 0x00,
-            0x57, 0x45, 0x42, 0x50
-        };
-        assertEquals("WEBP", StegoImageTypeClassifier.classify(webp));
-    }
-
-    @Test
-    @DisplayName("Tipo desconocido retorna UNKNOWN")
-    void unknownTypeReturnsUnknown() {
-        byte[] unknown = {0x00, 0x01, 0x02, 0x03};
-        assertEquals("UNKNOWN", StegoImageTypeClassifier.classify(unknown));
-    }
-
-    @Test
-    @DisplayName("Null retorna UNKNOWN sin excepción")
-    void nullReturnsUnknown() {
-        assertDoesNotThrow(() -> assertEquals("UNKNOWN", StegoImageTypeClassifier.classify(null)));
-    }
-
-    @Test
-    @DisplayName("Array vacío retorna UNKNOWN sin excepción")
-    void emptyArrayReturnsUnknown() {
-        assertDoesNotThrow(() -> assertEquals("UNKNOWN", StegoImageTypeClassifier.classify(new byte[]{})));
-    }
-
-    // ── Análisis aplicable por tipo ───────────────────────────────────────────
-
-    @Test
-    @DisplayName("JPEG es candidato para análisis LSB")
-    void jpegIsCandidateForLsbAnalysis() {
-        assertTrue(StegoImageTypeClassifier.supportsLsbAnalysis("JPEG"));
-    }
-
-    @Test
-    @DisplayName("PNG es candidato para análisis LSB")
-    void pngIsCandidateForLsbAnalysis() {
-        assertTrue(StegoImageTypeClassifier.supportsLsbAnalysis("PNG"));
-    }
-
-    @Test
-    @DisplayName("GIF NO es candidato para análisis LSB estándar")
-    void gifIsNotCandidateForLsbAnalysis() {
-        assertFalse(StegoImageTypeClassifier.supportsLsbAnalysis("GIF"));
-    }
-
-    @Test
-    @DisplayName("UNKNOWN NO es candidato para análisis LSB")
-    void unknownIsNotCandidateForLsbAnalysis() {
-        assertFalse(StegoImageTypeClassifier.supportsLsbAnalysis("UNKNOWN"));
-    }
-
-    // ── Análisis EOF aplicable ────────────────────────────────────────────────
-
-    @ParameterizedTest
-    @CsvSource({"JPEG,true", "PNG,true", "GIF,true", "WEBP,false", "UNKNOWN,false"})
-    @DisplayName("Verifica qué tipos soportan análisis EOF")
-    void eofAnalysisSupportByType(String type, boolean expected) {
-        assertEquals(expected, StegoImageTypeClassifier.supportsEofAnalysis(type));
+        StegoImageTypeClassifier.Classification c = StegoImageTypeClassifier.classify(img, "image/png");
+        assertEquals(StegoImageTypeClassifier.ImageType.PHOTOGRAPHIC, c.type());
+        assertTrue(c.sampleCount() > 0);
     }
 }

@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: ec.edu.espe.SecureFrameGallery.modules.gallery.services.GalleryServiceImplTest
+-------------------------------------------------------------------------------
+Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.440 s -- in ec.edu.espe.SecureFrameGallery.modules.gallery.services.GalleryServiceImplTest

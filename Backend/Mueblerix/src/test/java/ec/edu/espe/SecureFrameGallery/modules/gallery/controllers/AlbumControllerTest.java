@@ -1,9 +1,10 @@
 package ec.edu.espe.SecureFrameGallery.modules.gallery.controllers;
 
+import ec.edu.espe.SecureFrameGallery.modules.auth.entities.User;
+import ec.edu.espe.SecureFrameGallery.modules.auth.repositories.UserRepository;
 import ec.edu.espe.SecureFrameGallery.modules.gallery.dtos.AlbumCreateDto;
 import ec.edu.espe.SecureFrameGallery.modules.gallery.dtos.AlbumResponseDto;
 import ec.edu.espe.SecureFrameGallery.modules.gallery.services.GalleryService;
-import ec.edu.espe.SecureFrameGallery.shared.enums.AlbumStatus;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,14 +13,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 
-import java.security.Principal;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,7 +30,10 @@ class AlbumControllerTest {
     private GalleryService galleryService;
 
     @Mock
-    private Principal principal;
+    private UserRepository userRepository;
+
+    @Mock
+    private Authentication authentication;
 
     @InjectMocks
     private AlbumController albumController;
@@ -40,12 +43,12 @@ class AlbumControllerTest {
     @Test
     @DisplayName("GET /albums retorna 200 con lista de álbumes aprobados")
     void getPublicAlbumsReturns200() {
-        AlbumResponseDto dto = new AlbumResponseDto();
-        dto.setId(UUID.randomUUID());
-        dto.setTitle("Álbum público");
-        dto.setApprovalStatus(AlbumStatus.APPROVED);
+        AlbumResponseDto dto = AlbumResponseDto.builder()
+                .id(UUID.randomUUID())
+                .title("Álbum público")
+                .build();
 
-        when(galleryService.getPublicAlbums()).thenReturn(List.of(dto));
+        when(galleryService.getPublicApprovedAlbums()).thenReturn(List.of(dto));
 
         ResponseEntity<?> response = albumController.getPublicAlbums();
 
@@ -56,7 +59,7 @@ class AlbumControllerTest {
     @Test
     @DisplayName("GET /albums retorna lista vacía si no hay álbumes aprobados")
     void getPublicAlbumsReturnsEmptyList() {
-        when(galleryService.getPublicAlbums()).thenReturn(List.of());
+        when(galleryService.getPublicApprovedAlbums()).thenReturn(List.of());
 
         ResponseEntity<?> response = albumController.getPublicAlbums();
 
@@ -73,16 +76,21 @@ class AlbumControllerTest {
         request.setDescription("Fotos del campus");
         request.setPublic(true);
 
-        AlbumResponseDto created = new AlbumResponseDto();
-        created.setId(UUID.randomUUID());
-        created.setTitle("Mi álbum");
-        created.setApprovalStatus(AlbumStatus.PENDING_REVIEW);
+        User owner = User.builder()
+                .id(UUID.randomUUID())
+                .email("user@espe.edu.ec")
+                .build();
 
-        when(principal.getName()).thenReturn("user@espe.edu.ec");
-        when(galleryService.createAlbum(any(AlbumCreateDto.class), eq("user@espe.edu.ec")))
-            .thenReturn(created);
+        AlbumResponseDto created = AlbumResponseDto.builder()
+                .id(UUID.randomUUID())
+                .title("Mi álbum")
+                .build();
 
-        ResponseEntity<?> response = albumController.createAlbum(request, principal);
+        when(authentication.getName()).thenReturn("user@espe.edu.ec");
+        when(userRepository.findByEmail("user@espe.edu.ec")).thenReturn(java.util.Optional.of(owner));
+        when(galleryService.createAlbum(any(AlbumCreateDto.class), any(User.class))).thenReturn(created);
+
+        ResponseEntity<?> response = albumController.createAlbum(request, authentication);
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
     }
@@ -93,13 +101,21 @@ class AlbumControllerTest {
         AlbumCreateDto request = new AlbumCreateDto();
         request.setTitle("Nuevo álbum");
 
-        AlbumResponseDto created = new AlbumResponseDto();
-        created.setApprovalStatus(AlbumStatus.PENDING_REVIEW);
+        User owner = User.builder()
+            .id(UUID.randomUUID())
+            .email("user@espe.edu.ec")
+            .build();
 
-        when(principal.getName()).thenReturn("user@espe.edu.ec");
-        when(galleryService.createAlbum(any(), any())).thenReturn(created);
+        AlbumResponseDto created = AlbumResponseDto.builder()
+            .id(UUID.randomUUID())
+            .title("Nuevo álbum")
+            .build();
 
-        ResponseEntity<?> response = albumController.createAlbum(request, principal);
+        when(authentication.getName()).thenReturn("user@espe.edu.ec");
+        when(userRepository.findByEmail("user@espe.edu.ec")).thenReturn(java.util.Optional.of(owner));
+        when(galleryService.createAlbum(any(), any(User.class))).thenReturn(created);
+
+        ResponseEntity<?> response = albumController.createAlbum(request, authentication);
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
     }
@@ -109,41 +125,22 @@ class AlbumControllerTest {
     @Test
     @DisplayName("GET /albums/mine retorna solo álbumes del usuario autenticado")
     void getMyAlbumsReturnsOwnAlbums() {
-        AlbumResponseDto mine = new AlbumResponseDto();
-        mine.setId(UUID.randomUUID());
-        mine.setTitle("Mi álbum personal");
+        AlbumResponseDto mine = AlbumResponseDto.builder()
+                .id(UUID.randomUUID())
+                .title("Mi álbum personal")
+                .build();
 
-        when(principal.getName()).thenReturn("user@espe.edu.ec");
-        when(galleryService.getAlbumsByOwner("user@espe.edu.ec")).thenReturn(List.of(mine));
+        User owner = User.builder()
+                .id(UUID.randomUUID())
+                .email("user@espe.edu.ec")
+                .build();
 
-        ResponseEntity<?> response = albumController.getMyAlbums(principal);
+        when(authentication.getName()).thenReturn("user@espe.edu.ec");
+        when(userRepository.findByEmail("user@espe.edu.ec")).thenReturn(java.util.Optional.of(owner));
+        when(galleryService.getMyAlbums(owner)).thenReturn(List.of(mine));
 
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-    }
-
-    // ── GET /albums/{id} ──────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("GET /albums/{id} retorna 200 para álbum existente")
-    void getAlbumByIdReturns200() {
-        UUID id = UUID.randomUUID();
-        AlbumResponseDto dto = new AlbumResponseDto();
-        dto.setId(id);
-        dto.setApprovalStatus(AlbumStatus.APPROVED);
-
-        when(galleryService.getAlbumById(id)).thenReturn(dto);
-
-        ResponseEntity<?> response = albumController.getAlbumById(id);
+        ResponseEntity<?> response = albumController.getMyAlbums(authentication);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-    }
-
-    @Test
-    @DisplayName("GET /albums/{id} lanza excepción para álbum inexistente")
-    void getAlbumByIdThrowsForUnknownId() {
-        UUID fakeId = UUID.randomUUID();
-        when(galleryService.getAlbumById(fakeId)).thenThrow(new RuntimeException("No encontrado"));
-
-        assertThrows(RuntimeException.class, () -> albumController.getAlbumById(fakeId));
     }
 }

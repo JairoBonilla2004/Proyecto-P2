@@ -18,6 +18,11 @@ public class Argon2Util {
     }
 
     public boolean verify(String rawPassword, String encodedPassword) { // Verifica si la contraseña sin formato coincide con el hash almacenado
-        return encoder.matches(rawPassword, encodedPassword);
+        try {
+            return encoder.matches(rawPassword, encodedPassword);
+        } catch (RuntimeException ex) {
+            // Hash corrupto o formato inválido: tratar como no coincide.
+            return false;
+        }
     }
 }

@@ -1,0 +1,213 @@
+name: secureframe-backend
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect app directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "pom.xml" && -f "Dockerfile" ]]; then
+            app_dir="."
+          elif [[ -f "Mueblerix/pom.xml" && -f "Mueblerix/Dockerfile" ]]; then
+            app_dir="Mueblerix"
+          elif [[ -f "Backend/Mueblerix/pom.xml" && -f "Backend/Mueblerix/Dockerfile" ]]; then
+            app_dir="Backend/Mueblerix"
+          else
+            echo "No se pudo detectar el directorio de la app (pom.xml/Dockerfile)." >&2
+            exit 1
+          fi
+          echo "APP_DIR=$app_dir" >> "$GITHUB_ENV"
+          echo "Usando APP_DIR=$app_dir"
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Maven verify
+        working-directory: ${{ env.APP_DIR }}
+        run: mvn -B clean verify
+
+      - name: SonarQube scan
+        if: >-
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          secrets.SONAR_TOKEN != '' &&
+          vars.SONAR_HOST_URL != ''
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY || github.repository }}
+        run: >-
+          mvn -B sonar:sonar
+          -Dsonar.host.url="$SONAR_HOST_URL"
+          -Dsonar.login="$SONAR_TOKEN"
+          -Dsonar.projectKey="$SONAR_PROJECT_KEY"
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: ci
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) &&
+      secrets.DOCKERHUB_USERNAME != '' &&
+      secrets.DOCKERHUB_TOKEN != ''
+
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      tag: ${{ steps.meta.outputs.tag }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect app directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "pom.xml" && -f "Dockerfile" ]]; then
+            app_dir="."
+          elif [[ -f "Mueblerix/pom.xml" && -f "Mueblerix/Dockerfile" ]]; then
+            app_dir="Mueblerix"
+          elif [[ -f "Backend/Mueblerix/pom.xml" && -f "Backend/Mueblerix/Dockerfile" ]]; then
+            app_dir="Backend/Mueblerix"
+          else
+            echo "No se pudo detectar el directorio de la app (pom.xml/Dockerfile)." >&2
+            exit 1
+          fi
+          echo "APP_DIR=$app_dir" >> "$GITHUB_ENV"
+
+      - name: Compute image name and tag
+        id: meta
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          set -euo pipefail
+          image_name="secureframe-gallery-backend"
+          image="$DOCKERHUB_USERNAME/$image_name"
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="sha-${GITHUB_SHA::7}"
+          fi
+
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.APP_DIR }}
+          file: ${{ env.APP_DIR }}/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+
+  gitops:
+    runs-on: ubuntu-latest
+    needs: docker
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) &&
+      secrets.GITOPS_TOKEN != '' &&
+      vars.GITOPS_REPO != ''
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout manifests repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: manifests
+
+      - name: Set up kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Select overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            overlay="dev"
+          else
+            overlay="prod"
+          fi
+          echo "OVERLAY=$overlay" >> "$GITHUB_ENV"
+
+      - name: Update image tag in kustomization
+        shell: bash
+        env:
+          IMAGE: ${{ needs.docker.outputs.image }}
+          TAG: ${{ needs.docker.outputs.tag }}
+        run: |
+          set -euo pipefail
+          overlay_dir="manifests/apps/secureframe-gallery/backend/overlays/${OVERLAY}"
+          if [[ ! -d "$overlay_dir" ]]; then
+            echo "No existe overlay_dir=$overlay_dir" >&2
+            exit 1
+          fi
+
+          pushd "$overlay_dir" >/dev/null
+          kustomize edit set image jsbonilla2/secureframe-gallery-backend="${IMAGE}:${TAG}"
+          popd >/dev/null
+
+      - name: Commit and push
+        shell: bash
+        env:
+          IMAGE: ${{ needs.docker.outputs.image }}
+          TAG: ${{ needs.docker.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd manifests
+
+          if git diff --quiet; then
+            echo "No hay cambios que commitear."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(gitops): bump backend image to ${IMAGE}:${TAG}"
+          git push

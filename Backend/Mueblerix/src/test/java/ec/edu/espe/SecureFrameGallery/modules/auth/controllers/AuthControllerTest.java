@@ -3,7 +3,9 @@ package ec.edu.espe.SecureFrameGallery.modules.auth.controllers;
 import ec.edu.espe.SecureFrameGallery.modules.auth.dtos.LoginRequest;
 import ec.edu.espe.SecureFrameGallery.modules.auth.dtos.RegisterRequest;
 import ec.edu.espe.SecureFrameGallery.modules.auth.dtos.TokenResponse;
+import ec.edu.espe.SecureFrameGallery.modules.auth.entities.User;
 import ec.edu.espe.SecureFrameGallery.modules.auth.services.AuthService;
+import ec.edu.espe.SecureFrameGallery.shared.dtos.ApiResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,8 +39,8 @@ class AuthControllerTest {
         req.setEmail("nuevo@espe.edu.ec");
         req.setPassword("Seguro1234!");
 
-        TokenResponse token = new TokenResponse("jwt.token.aqui");
-        when(authService.register(any(RegisterRequest.class))).thenReturn(token);
+        User saved = User.builder().email("nuevo@espe.edu.ec").build();
+        when(authService.register(any(RegisterRequest.class))).thenReturn(saved);
 
         ResponseEntity<?> response = authController.register(req);
 
@@ -81,7 +83,13 @@ class AuthControllerTest {
         req.setEmail("user@espe.edu.ec");
         req.setPassword("Pass1234!");
 
-        TokenResponse token = new TokenResponse("jwt.token.valido");
+        TokenResponse token = TokenResponse.builder()
+            .accessToken("jwt.token.valido")
+            .tokenType("Bearer")
+            .expiresIn(3600)
+            .email("user@espe.edu.ec")
+            .role("ROLE_USER")
+            .build();
         when(authService.login(any(LoginRequest.class))).thenReturn(token);
 
         ResponseEntity<?> response = authController.login(req);
@@ -126,13 +134,24 @@ class AuthControllerTest {
         req.setPassword("Pass1234!");
 
         String expectedToken = "eyJhbGciOiJIUzI1NiJ9.payload.signature";
-        when(authService.login(any())).thenReturn(new TokenResponse(expectedToken));
+        when(authService.login(any())).thenReturn(TokenResponse.builder()
+            .accessToken(expectedToken)
+            .tokenType("Bearer")
+            .expiresIn(3600)
+            .email("user@espe.edu.ec")
+            .role("ROLE_USER")
+            .build());
 
         ResponseEntity<?> response = authController.login(req);
 
-        assertTrue(response.getBody().toString().contains("token") ||
-                   response.getBody() instanceof TokenResponse,
-            "El cuerpo debe contener el token JWT");
+        assertNotNull(response.getBody(), "El cuerpo no debe ser nulo");
+        assertTrue(response.getBody() instanceof ApiResponse, "La respuesta debe envolver ApiResponse");
+
+        @SuppressWarnings("unchecked")
+        ApiResponse<TokenResponse> body = (ApiResponse<TokenResponse>) response.getBody();
+        assertTrue(body.isSuccess(), "La respuesta debe ser exitosa");
+        assertNotNull(body.getData(), "ApiResponse.data no debe ser nulo");
+        assertEquals(expectedToken, body.getData().getAccessToken(), "Debe devolver el accessToken esperado");
     }
 
     @Test
@@ -143,7 +162,7 @@ class AuthControllerTest {
         req.setEmail("unico@espe.edu.ec");
         req.setPassword("Pass1234!");
 
-        when(authService.register(any())).thenReturn(new TokenResponse("token"));
+        when(authService.register(any())).thenReturn(User.builder().email("unico@espe.edu.ec").build());
 
         authController.register(req);
 
