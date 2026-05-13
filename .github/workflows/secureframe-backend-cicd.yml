@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Forzar el uso seguro de Node 24 para evitar las advertencias de depreciación
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -57,17 +61,21 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY || github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "${SONAR_TOKEN:-}" ]]; then
-            echo "SonarCloud no configurado (falta SONAR_TOKEN). Skipping."
+          if [[ -z "${SONAR_TOKEN:-}" || -z "${SONAR_ORGANIZATION:-}" ]]; then
+            echo "SonarCloud no configurado (faltan SONAR_TOKEN o SONAR_ORGANIZATION). Skipping."
             exit 0
           fi
 
           mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:4.0.0.4121:sonar \
             -Dsonar.host.url="$SONAR_HOST_URL" \
-            -Dsonar.token="$SONAR_TOKEN"
+            -Dsonar.token="$SONAR_TOKEN" \
+            -Dsonar.organization="$SONAR_ORGANIZATION" \
+            -Dsonar.projectKey="$SONAR_PROJECT_KEY"
 
   docker:
     runs-on: ubuntu-latest
@@ -77,16 +85,13 @@ jobs:
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
 
     outputs:
-      image: ${{ steps.meta.outputs.image }}
+      # Exportamos solo el tag, ya que el nombre de la imagen lo reconstruirá GitOps sin filtrar secretos
       tag: ${{ steps.meta.outputs.tag }}
 
     permissions:
       contents: read
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Guard — DockerHub configured
         id: guard
         shell: bash
@@ -96,14 +101,14 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${DOCKERHUB_USERNAME:-}" || -z "${DOCKERHUB_TOKEN:-}" ]]; then
-            echo "DockerHub secrets no configurados (DOCKERHUB_USERNAME/DOCKERHUB_TOKEN). Skipping docker job."
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "DockerHub secrets no configurados. Skipping docker job."
+            exit 1
           fi
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Detect app directory
-        if: steps.guard.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -119,60 +124,45 @@ jobs:
           fi
           echo "APP_DIR=$app_dir" >> "$GITHUB_ENV"
 
-      - name: Compute image name and tag
+      - name: Compute image tag
         id: meta
-        if: steps.guard.outputs.enabled == 'true'
         shell: bash
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euo pipefail
-          image_name="secureframe-gallery-backend"
-          image="$DOCKERHUB_USERNAME/$image_name"
-
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             tag="${GITHUB_REF_NAME}"
           else
             tag="sha-${GITHUB_SHA::7}"
           fi
-
-          echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "IMAGE=$image" >> "$GITHUB_ENV"
           echo "TAG=$tag" >> "$GITHUB_ENV"
 
       - name: Set up QEMU
-        if: steps.guard.outputs.enabled == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        if: steps.guard.outputs.enabled == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to DockerHub
-        if: steps.guard.outputs.enabled == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push
-        if: steps.guard.outputs.enabled == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ${{ env.APP_DIR }}
           file: ${{ env.APP_DIR }}/Dockerfile
           push: true
-          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/secureframe-gallery-backend:${{ env.TAG }}
 
   gitops:
     runs-on: ubuntu-latest
     needs: docker
     if: >-
       github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) &&
-      needs.docker.outputs.image != '' &&
-      needs.docker.outputs.tag != ''
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
 
     permissions:
       contents: read
@@ -187,14 +177,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${GITOPS_REPO:-}" || -z "${GITOPS_TOKEN:-}" ]]; then
-            echo "GitOps no configurado (faltan GITOPS_REPO o GITOPS_TOKEN). Skipping gitops job."
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "GitOps no configurado (faltan GITOPS_REPO o GITOPS_TOKEN). Failing job."
+            exit 1
           fi
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout manifests repo
-        if: steps.guard.outputs.enabled == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ vars.GITOPS_REPO }}
@@ -202,11 +189,9 @@ jobs:
           path: manifests
 
       - name: Set up kustomize
-        if: steps.guard.outputs.enabled == 'true'
         uses: imranismail/setup-kustomize@v2
 
       - name: Select overlay
-        if: steps.guard.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -218,10 +203,9 @@ jobs:
           echo "OVERLAY=$overlay" >> "$GITHUB_ENV"
 
       - name: Update image tag in kustomization
-        if: steps.guard.outputs.enabled == 'true'
         shell: bash
         env:
-          IMAGE: ${{ needs.docker.outputs.image }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           TAG: ${{ needs.docker.outputs.tag }}
         run: |
           set -euo pipefail
@@ -231,15 +215,17 @@ jobs:
             exit 1
           fi
 
+          # Reconstruimos la firma de la imagen de forma segura sin pasar outputs bloqueados
+          FULL_IMAGE="${DOCKERHUB_USERNAME}/secureframe-gallery-backend:${TAG}"
+
           pushd "$overlay_dir" >/dev/null
-          kustomize edit set image jsbonilla2/secureframe-gallery-backend="${IMAGE}:${TAG}"
+          kustomize edit set image jsbonilla2/secureframe-gallery-backend="${FULL_IMAGE}"
           popd >/dev/null
 
       - name: Commit and push
-        if: steps.guard.outputs.enabled == 'true'
         shell: bash
         env:
-          IMAGE: ${{ needs.docker.outputs.image }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           TAG: ${{ needs.docker.outputs.tag }}
         run: |
           set -euo pipefail
@@ -251,7 +237,7 @@ jobs:
           fi
 
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "github-actions[bot]@github.com"
           git add -A
-          git commit -m "chore(gitops): bump backend image to ${IMAGE}:${TAG}"
+          git commit -m "chore(gitops): bump backend image to ${DOCKERHUB_USERNAME}/secureframe-gallery-backend:${TAG}"
           git push
