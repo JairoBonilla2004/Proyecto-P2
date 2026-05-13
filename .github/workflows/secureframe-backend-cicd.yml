@@ -19,6 +19,11 @@ jobs:
   ci:
     runs-on: ubuntu-latest
 
+    # Necesario para publicar el reporte como "check" visual en GitHub Actions.
+    permissions:
+      contents: read
+      checks: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,6 +57,31 @@ jobs:
       - name: Maven verify
         working-directory: ${{ env.APP_DIR }}
         run: mvn -B clean verify
+
+      - name: Publish JUnit test report
+        if: >-
+          always() &&
+          (
+            github.event_name != 'pull_request' ||
+            github.event.pull_request.head.repo.full_name == github.repository
+          )
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          # Maven Surefire/Failsafe (incluye JUnit 5 / JUnit Platform) generan XML tipo JUnit.
+          files: |
+            ${{ env.APP_DIR }}/**/target/surefire-reports/*.xml
+            ${{ env.APP_DIR }}/**/target/failsafe-reports/*.xml
+
+      - name: Upload JUnit XML reports (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-xml-reports
+          path: |
+            ${{ env.APP_DIR }}/**/target/surefire-reports/*.xml
+            ${{ env.APP_DIR }}/**/target/failsafe-reports/*.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: SonarQube scan
         if: >-
