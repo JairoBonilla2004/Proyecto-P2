@@ -1,0 +1,152 @@
+spring:
+  application:
+    name: SecureFrameGallery
+  profiles:
+    active: dev
+
+  # DATABASE — PostgreSQL
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:securegallery}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:changeme}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 30000
+      auto-commit: true
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 20
+          fetch_size: 50
+        order_inserts: true
+        order_updates: true
+
+  # SECURITY — JWT Resource Server
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:REPLACE_ME}
+            client-secret: ${GOOGLE_CLIENT_SECRET:REPLACE_ME}
+            scope:
+              - openid
+              - email
+              - profile
+            redirect-uri: "{baseUrl}/login/oauth2/code/google"
+        provider:
+          google:
+            authorization-uri: https://accounts.google.com/o/oauth2/v2/auth
+            token-uri: https://oauth2.googleapis.com/token
+            user-info-uri: https://www.googleapis.com/oauth2/v3/userinfo
+            jwk-set-uri: https://www.googleapis.com/oauth2/v3/certs
+            user-name-attribute: email
+  # SERVLET — File Upload
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
+
+# APPLICATION CUSTOM PROPERTIES
+app:
+  # JWT
+  jwt:
+    secret: ${JWT_SECRET:supersecretkey-must-be-at-least-256-bits-long-for-HS256-algo}
+    expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+
+  # Cloudinary
+  cloudinary:
+    cloud-name: ${CLOUDINARY_CLOUD_NAME:REPLACE_ME}
+    api-key: ${CLOUDINARY_API_KEY:REPLACE_ME}
+    api-secret: ${CLOUDINARY_API_SECRET:REPLACE_ME}
+
+  steganography:
+    # ── LSB-based detection thresholds ─────────────────────────────────────
+    chi-square-pvalue-threshold: 0.90
+    chi-square-pvalue-threshold-synthetic: 0.94
+    delta-entropy-threshold: 0.04
+    delta-entropy-high-threshold: 0.07
+    sequential-transition-threshold: 0.46
+    sequential-delta-threshold: 0.04
+    regional-fraction: 0.05
+    smooth-gradient-threshold: 12
+    min-smooth-ratio: 0.05
+    min-pixels: 262144
+    max-image-size-mb: 10
+    lsb-entropy-threshold: 0.995
+    
+    # ── Advanced/aggressive detection thresholds ──────────────────────────
+    # Pixel correlation: natural images > 0.85; steganography < 0.80
+    pixel-correlation-threshold: 0.80
+    # Block anomaly: ratio of suspicious blocks in the image
+    block-anomaly-ratio: 0.10
+    # Range distortion: min-max ratio; abnormal if < 0.30 or > 1.20
+    range-distortion-threshold: 0.30
+    # Noise artificality: how artificial/random does the noise look (0.0-1.0)
+    noise-artificality-threshold: 0.60
+    # For smaller images (<= this many pixels), run stride=1 (pixel-by-pixel) in advanced analysis
+    full-scan-max-pixels: 1000000
+
+  # Sanitization / Metadata stripping
+  sanitization:
+    jpeg-quality: 0.92
+
+  # Rate Limiting
+  rate-limit:
+    auth-requests-per-minute: 5
+    upload-requests-per-minute: 10
+
+  # CORS
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:4200,http://localhost:8080}
+
+# ACTUATOR
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+
+# LOGGING
+logging:
+  level:
+    root: INFO
+    ec.edu.espe: DEBUG
+    org.springframework.security: WARN
+    org.springframework.web: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/secureframe.log
+    max-size: 10MB
+    max-history: 10
+
+# SPRINGDOC (OpenAPI/Swagger)
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    operations-sorter: method
+    tags-sorter: alpha
