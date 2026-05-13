@@ -85,7 +85,7 @@ jobs:
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
 
     outputs:
-      # Exportamos solo el tag, ya que el nombre de la imagen lo reconstruirá GitOps sin filtrar secretos
+      # Exportamos solo el tag, ya que el nombre de la imagen lo reconstruirá GitOps sin filtrar secreto
       tag: ${{ steps.meta.outputs.tag }}
 
     permissions:
