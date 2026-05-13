@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Detect app directory
         shell: bash
@@ -49,24 +51,26 @@ jobs:
 
       - name: SonarQube scan
         if: >-
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main'
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
         working-directory: ${{ env.APP_DIR }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          SONAR_HOST_URL: https://sonarcloud.io
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY || github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "${SONAR_TOKEN:-}" || -z "${SONAR_HOST_URL:-}" ]]; then
-            echo "SonarQube no configurado (faltan SONAR_TOKEN o SONAR_HOST_URL). Skipping."
+          if [[ -z "${SONAR_TOKEN:-}" || -z "${SONAR_ORGANIZATION:-}" ]]; then
+            echo "SonarCloud no configurado (faltan SONAR_TOKEN o SONAR_ORGANIZATION). Skipping."
             exit 0
           fi
 
-          mvn -B sonar:sonar \
+          mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:4.0.0.4121:sonar \
             -Dsonar.host.url="$SONAR_HOST_URL" \
-            -Dsonar.login="$SONAR_TOKEN" \
+            -Dsonar.token="$SONAR_TOKEN" \
+            -Dsonar.organization="$SONAR_ORGANIZATION" \
             -Dsonar.projectKey="$SONAR_PROJECT_KEY"
 
   docker:
