@@ -1,0 +1,61 @@
+# Test profile — uses H2 in-memory database.
+# Activated automatically via @ActiveProfiles("test") in test classes.
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+    show-sql: false
+    open-in-view: false
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: test-client-id
+            client-secret: test-client-secret
+
+app:
+  jwt:
+    secret: test-secret-key-must-be-at-least-256-bits-long-for-HS256-algo
+    expiration-ms: 3600000
+
+  cloudinary:
+    cloud-name: test-cloud
+    api-key: test-key
+    api-secret: test-secret
+
+  steganography:
+    chi-square-pvalue-threshold: 0.90
+    chi-square-pvalue-threshold-synthetic: 0.94
+    delta-entropy-threshold: 0.04
+    delta-entropy-high-threshold: 0.07
+    sequential-transition-threshold: 0.46
+    sequential-delta-threshold: 0.04
+    lsb-entropy-threshold: 0.995
+    
+    # Advanced detection thresholds for testing
+    pixel-correlation-threshold: 0.80
+    block-anomaly-ratio: 0.10
+    range-distortion-threshold: 0.30
+    noise-artificality-threshold: 0.60
+    full-scan-max-pixels: 1000000
+    
+    max-image-size-mb: 10
+
+  rate-limit:
+    auth-requests-per-minute: 100
+
+logging:
+  level:
+    root: WARN
+    ec.edu.espe: INFO
