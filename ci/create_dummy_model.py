@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 def create_dummy_artifacts():
     """Crea artefactos dummy para testing."""
     
-    artifacts_dir = Path("modelo/model_artifacts")
+    # Script runs from ci/ so we need to go one level up to reach repo-level modelo/
+    artifacts_dir = Path("../modelo/model_artifacts")
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Creating dummy model artifacts for testing...")

@@ -329,11 +329,12 @@ def main():
     """Función principal."""
     try:
         # Configurar rutas
-        base_branch = os.getenv("BASE_BRANCH", "main")
+        # BASE_BRANCH puede ser un SHA (cuando viene de un PR) o nombre de rama
+        base_branch = os.getenv("BASE_BRANCH") or os.getenv("GITHUB_BASE_SHA", "HEAD~1")
         head_branch = os.getenv("HEAD_BRANCH", "HEAD")
-        model_path = os.getenv("MODEL_PATH", "modelo/model_artifacts")
+        model_path = os.getenv("MODEL_PATH", "../modelo/model_artifacts")
         report_path = os.getenv(
-            "REPORT_PATH", "reports/security_report.json"
+            "REPORT_PATH", "../reports/security_report.json"
         )
 
         # Crear y ejecutar pipeline

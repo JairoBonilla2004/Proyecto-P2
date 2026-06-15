@@ -22,8 +22,9 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  MODEL_PATH: modelo/model_artifacts
-  REPORT_PATH: reports/security_report.json
+  # Paths are relative to the ci/ working directory
+  MODEL_PATH: ../modelo/model_artifacts
+  REPORT_PATH: ../reports/security_report.json
 
 jobs:
   detect-paths:
@@ -86,11 +87,10 @@ jobs:
 
       - name: Create dummy model if needed
         shell: bash
-        working-directory: ci
         run: |
-          if [[ ! -f "../modelo/model_artifacts/modelo_ensemble.joblib" ]]; then
+          if [[ ! -f "modelo/model_artifacts/modelo_ensemble.joblib" ]]; then
             echo "Creating dummy model for testing..."
-            python3 create_dummy_model.py || echo " Could not create dummy model, continuing without it"
+            cd ci && python3 create_dummy_model.py || echo "Could not create dummy model, continuing without it"
           else
             echo "✅ Model artifacts found"
           fi
@@ -105,6 +105,12 @@ jobs:
           GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Pass the PR base SHA so git diff compares against the real base commit
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.sha || 'HEAD~1' }}
+          HEAD_BRANCH: HEAD
+          MODEL_PATH: ${{ env.MODEL_PATH }}
+          REPORT_PATH: ${{ env.REPORT_PATH }}
         run: |
           set -euo pipefail
           python3 security_pipeline.py || {
@@ -118,9 +124,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: security-analysis-report
+          # Report is written relative to ci/ working dir, so path is reports/ under repo root
           path: reports/security_report.json
           retention-days: 30
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
       - name: Comment PR with security results
         if: always() && github.event_name == 'pull_request'
