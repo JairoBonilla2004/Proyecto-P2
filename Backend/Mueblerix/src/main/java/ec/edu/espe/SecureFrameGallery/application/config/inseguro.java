@@ -1,42 +1,43 @@
 package ec.edu.espe.SecureFrameGallery.application.config;
+
 import java.io.*;
 import java.sql.*;
 import java.security.*;
-import java.util.Base64;
 
 public class inseguro {
 
-    // 1. Hardcoded Credentials (exposición de secretos)
-    private static final String DB_PASSWORD = "admin_password_super_secreto_123";
+    // 1. Hardcoded Creds: Expuestas y constantes globales, listas para ser extraídas con strings o grep
+    public static final String DB_USER = "root";
+    public static final String DB_PASS = "admin_password_super_secreto_123";
 
-    public void manejarDatos(String userProvidedData, String fileName) throws Exception {
+    public void ejecutarOperacionesPeligrosas(String input, String filePath) throws Exception {
         
-        // 2. SQL Injection (concatenación de strings en queries)
-        Connection con = DriverManager.getConnection("jdbc:mysql://localhost:3306/db", "root", DB_PASSWORD);
-        Statement st = con.createStatement();
-        String query = "SELECT * FROM users WHERE username = '" + userProvidedData + "'";
-        st.executeQuery(query);
+        // 2. Inyección SQL directa (sin PreparedStatements, sin limpieza, sin nada)
+        // Esto permite que el usuario cierre la comilla y añada comandos maliciosos
+        Connection conn = DriverManager.getConnection("jdbc:mysql://localhost:3306/db", DB_USER, DB_PASS);
+        String sql = "SELECT * FROM users WHERE user='" + input + "' AND pass='" + input + "'";
+        conn.createStatement().execute(sql);
 
-        // 3. Path Traversal (manipulación de rutas de archivos)
-        File file = new File("/var/www/uploads/" + fileName);
-        if (file.exists()) {
-            FileInputStream fis = new FileInputStream(file);
-            // ... procesamiento
-        }
+        // 3. Path Traversal (Abierto a cualquier directorio del sistema)
+        // Permite acceder a /etc/passwd o archivos del sistema subiendo un nivel
+        FileOutputStream fos = new FileOutputStream(new File("/var/www/data/" + filePath));
+        fos.write(input.getBytes());
 
-        // 4. Weak Hashing (Uso de MD5 para contraseñas)
-        MessageDigest md = MessageDigest.getInstance("MD5");
-        byte[] hash = md.digest(userProvidedData.getBytes());
-        
-        // 5. Command Injection (Ejecución de comandos del sistema con entrada externa)
-        Runtime.getRuntime().exec("echo " + userProvidedData);
+        // 4. MD5 es vulnerable a colisiones (obsoleto para seguridad)
+        MessageDigest md5 = MessageDigest.getInstance("MD5");
+        String passHash = new String(md5.digest(input.getBytes()));
 
-        // 6. Insecure Deserialization (Lectura de objetos sin validación)
-        ObjectInputStream ois = new ObjectInputStream(new FileInputStream(fileName));
-        ois.readObject();
+        // 5. OS Command Injection: Ejecución directa de comandos basados en entrada de usuario
+        // El usuario puede ejecutar: "; rm -rf / ;"
+        Process p = Runtime.getRuntime().exec("sh -c " + input);
 
-        // 7. Desactivación de validación de certificados SSL (posible Man-in-the-Middle)
-        // (Pseudocódigo común en configuraciones inseguras de clientes HTTP)
-        System.setProperty("javax.net.ssl.trustStore", "none");
+        // 6. Deserialización Insegura (Acepta cualquier objeto serializado sin verificar clases)
+        // Este es el vector de ataque más potente para ejecución remota de código (RCE)
+        ObjectInputStream ois = new ObjectInputStream(new FileInputStream(filePath));
+        Object obj = ois.readObject();
+
+        // 7. XSS (Reflejado) - Imprimiendo datos directamente sin escapar caracteres HTML
+        // Si esto termina en un JSP o frontend, un atacante puede inyectar scripts
+        System.out.println("<html><body>Usuario: " + input + "</body></html>");
     }
 }
