@@ -308,15 +308,21 @@ class SecurityPipeline:
 
     def _get_pr_number(self) -> int:
         """Obtiene número de PR desde variables de entorno."""
-        return int(os.getenv("GITHUB_PR_NUMBER", "0"))
+        try:
+            pr = os.getenv("GITHUB_PR_NUMBER", "").strip()
+            return int(pr) if pr else 0
+        except (ValueError, TypeError):
+            return 0
 
     def _get_commit_sha(self) -> Optional[str]:
         """Obtiene SHA del commit desde variables de entorno."""
-        return os.getenv("GITHUB_SHA")
+        sha = os.getenv("GITHUB_SHA", "").strip()
+        return sha if sha else None
 
     def _get_repository_name(self) -> str:
         """Obtiene nombre del repositorio desde variables de entorno."""
-        return os.getenv("GITHUB_REPOSITORY", "unknown")
+        repo = os.getenv("GITHUB_REPOSITORY", "").strip()
+        return repo if repo else "unknown"
 
 
 def main():
