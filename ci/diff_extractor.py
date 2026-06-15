@@ -90,33 +90,53 @@ class DiffExtractor:
             return True
         return False
 
-    def get_diff(self) -> str:
+    def _get_diff_with_fallback(self) -> str:
         """
-        Obtiene el diff entre branches.
+        Obtiene el diff con fallback automático.
 
-        Returns:
-            String con el diff en formato unified
-
-        Raises:
-            subprocess.CalledProcessError: Si git falla
+        Primero intenta base_branch...HEAD. Si el resultado está vacío
+        (puede ocurrir en push events donde base_branch es un SHA no disponible),
+        hace fallback a HEAD~1...HEAD para capturar el último commit.
         """
         try:
-            result = subprocess.run(
-                [
-                    "git",
-                    "diff",
-                    f"{self.base_branch}...{self.head_branch}",
-                    "--unified=1",
-                ],
-                capture_output=True,
-                text=True,
-                check=True,
+            diff = self._run_git_diff(self.base_branch, self.head_branch)
+            if diff.strip():
+                logger.debug(f"Git diff OK: {self.base_branch}...{self.head_branch}")
+                return diff
+
+            # Fallback: comparar con el commit anterior
+            logger.warning(
+                f"Empty diff for {self.base_branch}...{self.head_branch}, "
+                "falling back to HEAD~1...HEAD"
             )
-            logger.debug("Git diff retrieved successfully")
-            return result.stdout
+            diff_fallback = self._run_git_diff("HEAD~1", "HEAD")
+            if diff_fallback.strip():
+                return diff_fallback
+
+            logger.warning("Both diffs are empty — no code changes detected")
+            return ""
+
         except subprocess.CalledProcessError as e:
-            logger.error(f"Git diff failed: {e.stderr}")
-            raise
+            logger.warning(f"Primary diff failed: {e.stderr}. Trying HEAD~1...")
+            try:
+                return self._run_git_diff("HEAD~1", "HEAD")
+            except subprocess.CalledProcessError as e2:
+                logger.error(f"Fallback diff also failed: {e2.stderr}")
+                return ""
+
+    def _run_git_diff(self, base: str, head: str) -> str:
+        """Ejecuta git diff entre dos referencias."""
+        result = subprocess.run(
+            ["git", "diff", f"{base}...{head}", "--unified=5"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout
+
+    def get_diff(self) -> str:
+        """Obtiene el diff entre branches (compatibilidad hacia atrás)."""
+        return self._get_diff_with_fallback()
 
     def extract_modified_files(self) -> list[dict]:
         """
@@ -165,61 +185,89 @@ class DiffExtractor:
             logger.error(f"Failed to extract modified files: {e.stderr}")
             raise
 
-    def extract_code_fragments(self) -> list[dict]:
+    def extract_code_fragments(self, min_block_lines: int = 1) -> list[dict]:
         """
-        Extrae fragmentos de código agregado/modificado.
+        Extrae bloques de código agregado/modificado del diff.
+
+        En lugar de retornar línea-a-línea, agrupa líneas contiguas en bloques
+        para que el modelo ML tenga suficiente contexto para detectar patrones
+        multi-línea (p.ej. SQL injection que abarca varias líneas).
 
         Returns:
-            Lista de fragmentos con {file, lines, code, type}
+            Lista de fragmentos con {file, line, code, type}
         """
         fragments = []
 
-        try:
-            diff_output = self.get_diff()
+        def _flush_block(current_file, start_line, lines):
+            """Convierte un bloque de líneas acumuladas en un fragmento."""
+            if not lines:
+                return
+            code_block = "\n".join(lines)
+            if code_block.strip():
+                fragments.append(
+                    {
+                        "file": current_file,
+                        "line": start_line,
+                        "code": code_block,
+                        "type": "added",
+                    }
+                )
 
-            # Expresión regular para parsear el diff
-            # @@@ ... @@ indica inicio de bloque
-            file_pattern = r"^diff --git a/(.*?) b/\1"
+        try:
+            diff_output = self._get_diff_with_fallback()
+
             hunk_pattern = r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@"
 
             current_file = None
             current_line_num = 1
 
+            # Acumuladores para el bloque actual
+            block_start_line = 1
+            block_lines: list[str] = []
+
             for line in diff_output.split("\n"):
-                # Detectar nuevo archivo
+                # Nuevo archivo detectado
                 if line.startswith("diff --git"):
+                    # Flush bloque pendiente del archivo anterior
+                    _flush_block(current_file, block_start_line, block_lines)
+                    block_lines = []
                     match = re.search(r"b/(.*?)$", line)
                     if match:
                         current_file = match.group(1)
 
-                # Detectar hunk (bloque de cambios)
-                if line.startswith("@@"):
+                # Nuevo hunk (bloque de cambios dentro del archivo)
+                elif line.startswith("@@"):
+                    # Flush bloque pendiente antes del nuevo hunk
+                    _flush_block(current_file, block_start_line, block_lines)
+                    block_lines = []
                     match = re.search(hunk_pattern, line)
                     if match:
                         current_line_num = int(match.group(1))
+                        block_start_line = current_line_num
 
-                # Capturar líneas agregadas (+) o modificadas
+                # Línea agregada (+) — acumular en el bloque actual
                 elif line.startswith("+") and not line.startswith("+++"):
                     if current_file and not self._should_ignore_file(current_file):
                         code = line[1:]  # Remover el prefijo '+'
-
-                        if code.strip():  # Ignorar líneas vacías
-                            fragments.append(
-                                {
-                                    "file": current_file,
-                                    "line": current_line_num,
-                                    "code": code.rstrip("\n"),
-                                    "type": "added",
-                                }
-                            )
-
+                        block_lines.append(code.rstrip("\n"))
                         current_line_num += 1
 
+                # Línea eliminada (-) — flush y resetear bloque
                 elif line.startswith("-") and not line.startswith("---"):
+                    _flush_block(current_file, block_start_line, block_lines)
+                    block_lines = []
+                    block_start_line = current_line_num
                     current_line_num += 1
 
+                # Línea de contexto (sin cambios) — flush y resetear bloque
                 elif not line.startswith("\\"):
+                    _flush_block(current_file, block_start_line, block_lines)
+                    block_lines = []
+                    block_start_line = current_line_num
                     current_line_num += 1
+
+            # Flush del último bloque
+            _flush_block(current_file, block_start_line, block_lines)
 
             logger.info(f"Extracted {len(fragments)} code fragments")
             return fragments
