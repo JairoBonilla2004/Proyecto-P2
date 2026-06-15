@@ -26,12 +26,4 @@ public class Insecure {
         fos.write(data);
         fos.close();
     }
-
-    // VULNERABILIDAD 3: Ejecución de comandos del sistema
-    // Uso inseguro de Runtime.exec con concatenación de parámetros.
-    public void pingServer(String ipAddress) throws Exception {
-        String command = "ping -c 4 " + ipAddress; 
-        // Si el usuario ingresa: "127.0.0.1; rm -rf /", se ejecuta el comando malicioso.
-        Runtime.getRuntime().exec(command);
-    }
 }
