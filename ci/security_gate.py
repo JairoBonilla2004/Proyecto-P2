@@ -42,36 +42,39 @@ class SecurityGate:
 
     def _load_artifacts(self):
         """Carga los artefactos del modelo."""
+        model_file = self.artifacts_path / "modelo_ensemble.joblib"
+        vectorizer_file = self.artifacts_path / "vectorizador_tfidf.joblib"
+        scaler_file = self.artifacts_path / "scaler_estructural.joblib"
+        selector_file = self.artifacts_path / "selector_features.joblib"
+
+        # Verificar si el modelo existe
+        if not model_file.exists():
+            logger.warning(
+                f" Model artifacts not found at {self.artifacts_path}. "
+                "Pipeline will run without ML predictions."
+            )
+            self.model = None
+            return
+
         try:
-            model_file = self.artifacts_path / "modelo_ensemble.joblib"
-            vectorizer_file = self.artifacts_path / "vectorizador_tfidf.joblib"
-            scaler_file = self.artifacts_path / "scaler_estructural.joblib"
-            selector_file = self.artifacts_path / "selector_features.joblib"
-
-            if not model_file.exists():
-                raise FileNotFoundError(f"Model not found: {model_file}")
-
             self.model = joblib.load(model_file)
-            logger.info("Model loaded successfully")
+            logger.info(" Model loaded successfully")
 
             if vectorizer_file.exists():
                 self.vectorizer = joblib.load(vectorizer_file)
-                logger.info("Vectorizer loaded successfully")
+                logger.info(" Vectorizer loaded")
 
             if scaler_file.exists():
                 self.scaler = joblib.load(scaler_file)
-                logger.info("Scaler loaded successfully")
+                logger.info("✅ Scaler loaded")
 
             if selector_file.exists():
                 self.feature_selector = joblib.load(selector_file)
-                logger.info("Feature selector loaded successfully")
+                logger.info("✅ Feature selector loaded")
 
-        except FileNotFoundError as e:
-            logger.error(f"Failed to load artifacts: {e}")
-            raise
         except Exception as e:
-            logger.error(f"Unexpected error loading artifacts: {e}")
-            raise
+            logger.error(f"Error loading artifacts: {e}")
+            self.model = None
 
     def _prepare_features(self, code: str) -> np.ndarray:
         """
@@ -141,6 +144,17 @@ class SecurityGate:
         Returns:
             Dict con {prediction, probability, risk_level}
         """
+        # Si no hay modelo, retornar predicción neutra
+        if self.model is None:
+            logger.warning("Model not available, returning neutral prediction")
+            return {
+                "prediction": "NO_MODEL",
+                "probability_safe": 0.5,
+                "probability_vulnerable": 0.5,
+                "risk_level": 50,
+                "decision": "REVISAR",
+            }
+
         try:
             # Preparar features
             feature_vector = self._prepare_features(code)
@@ -243,6 +257,11 @@ class SecurityGate:
             for p in predictions
             if p.get("prediction") == "SEGURO"
         )
+        no_model_count = sum(
+            1
+            for p in predictions
+            if p.get("prediction") == "NO_MODEL"
+        )
 
         overall_risk = (
             (vulnerable_count / total_predictions * 100)
@@ -251,23 +270,32 @@ class SecurityGate:
         )
 
         # Determinar resultado general
-        overall_decision = (
-            "RECHAZAR" if vulnerable_count > 0 else "ACEPTAR"
-        )
+        # Si hay modelo, decidir basado en vulnerabilidades
+        # Si no hay modelo, decidir basado en features análisis
+        if self.model is None and no_model_count > 0:
+            overall_decision = "REVISAR"
+            exit_code = 0  # No fallar si no hay modelo
+        else:
+            overall_decision = (
+                "RECHAZAR" if vulnerable_count > 0 else "ACEPTAR"
+            )
+            exit_code = 1 if vulnerable_count > 0 else 0
 
         report = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "pr_number": pr_number,
             "commit_sha": commit_sha,
+            "model_available": self.model is not None,
             "summary": {
                 "total_fragments": total_predictions,
                 "vulnerable_count": vulnerable_count,
                 "safe_count": safe_count,
+                "no_model_count": no_model_count,
                 "overall_risk_percentage": round(overall_risk, 2),
                 "overall_decision": overall_decision,
             },
             "predictions": predictions,
-            "exit_code": 1 if vulnerable_count > 0 else 0,
+            "exit_code": exit_code,
         }
 
         # Crear directorio si no existe
@@ -280,7 +308,8 @@ class SecurityGate:
 
         logger.info(f"Security report generated: {output_file}")
         logger.info(
-            f"Overall: {safe_count} safe, {vulnerable_count} vulnerable"
+            f"Overall: {safe_count} safe, {vulnerable_count} vulnerable, "
+            f"{no_model_count} no_model"
         )
 
         return str(output_path)

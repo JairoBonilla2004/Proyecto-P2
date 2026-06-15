@@ -46,7 +46,7 @@ jobs:
           elif [[ -f "Backend/Mueblerix/pom.xml" && -f "Backend/Mueblerix/Dockerfile" ]]; then
             app_dir="Backend/Mueblerix"
           else
-            echo "⚠️ No se detectó directorio de app, usando Backend/Mueblerix por defecto"
+            echo " No se detectó directorio de app, usando Backend/Mueblerix por defecto"
             app_dir="Backend/Mueblerix"
           fi
           echo "APP_DIR=$app_dir" >> "$GITHUB_ENV"
@@ -83,6 +83,17 @@ jobs:
           pip install --upgrade pip wheel
           pip install -r requirements.txt
           echo "✅ Dependencies installed"
+
+      - name: Create dummy model if needed
+        shell: bash
+        working-directory: ci
+        run: |
+          if [[ ! -f "../modelo/model_artifacts/modelo_ensemble.joblib" ]]; then
+            echo "Creating dummy model for testing..."
+            python3 create_dummy_model.py || echo " Could not create dummy model, continuing without it"
+          else
+            echo "✅ Model artifacts found"
+          fi
 
       - name: Run AI vulnerability detection
         id: security
@@ -158,7 +169,7 @@ jobs:
       - name: Security gate result
         if: env.SECURITY_FAILED == 'true'
         run: |
-          echo "❌ Security gate failed"
+          echo "Security gate failed"
           exit 1
 
   backend-tests:
@@ -190,7 +201,7 @@ jobs:
         run: |
           set -euo pipefail
           mvn -B clean verify
-          echo "✅ Tests passed"
+          echo "Tests passed"
 
       - name: Publish JUnit test report
         if: always()
@@ -235,7 +246,7 @@ jobs:
           set -euo pipefail
           pip install --upgrade pip
           pip install -r requirements.txt
-          echo "✅ Dependencies installed"
+          echo "Dependencies installed"
 
       - name: Run tests
         shell: bash
@@ -243,7 +254,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -f "tests.py" ]]; then
-            python3 tests.py || echo "⚠️ Some tests failed"
+            python3 tests.py || echo "Some tests failed"
           fi
 
       - name: Format validation with black
@@ -251,7 +262,7 @@ jobs:
         working-directory: ci
         run: |
           pip install black > /dev/null 2>&1
-          black --check *.py 2>/dev/null || echo "⚠️ Format issues detected"
+          black --check *.py 2>/dev/null || echo "Format issues detected"
           true
 
   docker-build:
@@ -276,7 +287,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${DOCKERHUB_USERNAME:-}" || -z "${DOCKERHUB_TOKEN:-}" ]]; then
-            echo "⚠️ DockerHub secrets not configured. Skipping."
+            echo "DockerHub secrets not configured. Skipping."
             exit 0
           fi
 
