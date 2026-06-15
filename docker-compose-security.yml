@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  security-pipeline:
+    build:
+      context: .
+      dockerfile: ci/Dockerfile
+    container_name: security-pipeline
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - BASE_BRANCH=${BASE_BRANCH:-main}
+      - HEAD_BRANCH=${HEAD_BRANCH:-HEAD}
+      - MODEL_PATH=/app/modelo/model_artifacts
+      - REPORT_PATH=/app/reports/security_report.json
+    volumes:
+      - .:/app
+      - ./reports:/app/reports
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /app
+    networks:
+      - security-net
+    restart: on-failure
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  security-net:
+    driver: bridge

@@ -1,0 +1,27 @@
+# =============================================================================
+# EXCLUSIONES ESPECÍFICAS DEL PROYECTO
+# =============================================================================
+
+# Ignorar la compilación de Maven por completo
+**/target/
+*.jar
+*.war
+*.ear
+
+# Ignorar logs de la aplicación
+**/logs/
+*.log
+
+# Entornos virtuales de Python (por si usas uno para detector.py localmente)
+venv/
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+
+# Archivos de configuración del sistema o IDEs
+.vscode/
+.idea/
+.DS_Store
+
+#archivos env
+.env
