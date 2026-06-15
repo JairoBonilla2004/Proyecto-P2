@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Optional
 
 from diff_extractor import DiffExtractor
-from feature_extractor import FeatureExtractor
 from security_gate import SecurityGate
 from telegram_notifier import TelegramNotifier
 
@@ -56,7 +55,6 @@ class SecurityPipeline:
         self.report_path = report_path
 
         self.diff_extractor = DiffExtractor(base_branch, head_branch)
-        self.feature_extractor = FeatureExtractor(language="auto")
         self.security_gate = SecurityGate(model_path)
 
         # Notificador es opcional
