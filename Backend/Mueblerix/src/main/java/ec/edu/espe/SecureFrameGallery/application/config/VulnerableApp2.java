@@ -15,7 +15,7 @@ public class VulnerableApp2 {
     // 1. Criptografía Rota y Random Inseguro (Debería activar _PAT_WEAK_HASH_PY / _PAT_WEAK_CRYPTO_JJ)
     public String generateToken() throws Exception {
         Random random = new Random(); // Inseguro
-        MessageDigest md = MessageDigest.getInstance("MD5"); // MD5 está roto, sumará al danger_score
+        MessageDigest md = MessageDigest.getInstance("MD5"); // MD5 está roto, sumará al git s
         byte[] hash = md.digest(("TOKEN-" + random.nextInt()).getBytes());
         return hash.toString();
     }
