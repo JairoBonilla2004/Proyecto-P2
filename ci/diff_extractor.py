@@ -45,20 +45,7 @@ class DiffExtractor:
 
     # Extensiones de código a analizar
     CODE_EXTENSIONS = {
-        ".py",
         ".java",
-        ".js",
-        ".ts",
-        ".jsx",
-        ".tsx",
-        ".go",
-        ".rs",
-        ".cpp",
-        ".c",
-        ".cs",
-        ".php",
-        ".rb",
-        ".sql",
     }
 
     def __init__(self, base_branch: str = "main", head_branch: Optional[str] = None):
@@ -133,10 +120,6 @@ class DiffExtractor:
             check=True,
         )
         return result.stdout
-
-    def get_diff(self) -> str:
-        """Obtiene el diff entre branches (compatibilidad hacia atrás)."""
-        return self._get_diff_with_fallback()
 
     def extract_modified_files(self) -> list[dict]:
         """
