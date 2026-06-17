@@ -36,9 +36,5 @@ ENV REPORT_PATH=/app/reports/security_report.json
 # Volúmenes
 VOLUME ["/app/reports", "/app/.git"]
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD test -f /app/reports/security_report.json || exit 1
-
 # Entrypoint
 ENTRYPOINT ["python", "security_pipeline.py"]

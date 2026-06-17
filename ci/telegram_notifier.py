@@ -6,7 +6,6 @@ Envía notificaciones de seguridad a Telegram usando credenciales
 de variables de entorno.
 """
 
-import json
 import logging
 import os
 from datetime import datetime
@@ -162,91 +161,6 @@ class TelegramNotifier:
             f"  • Fragmentos vulnerables: {vulnerable_count}\n"
             f"  • Riesgo general: {risk_percentage:.1f}%\n\n"
             f"<b>Hora:</b> {datetime.utcnow().isoformat()}Z"
-        )
-
-        return self.send_message(message)
-
-    def notify_vulnerability_found(
-        self,
-        pr_number: int,
-        repository: str,
-        file: str,
-        line: int,
-        risk_level: int,
-        code_snippet: Optional[str] = None,
-    ) -> bool:
-        """
-        Notifica detección de vulnerabilidad específica.
-
-        Args:
-            pr_number: Número del PR
-            repository: Nombre del repositorio
-            file: Archivo afectado
-            line: Línea del código
-            risk_level: Nivel de riesgo (0-100)
-            code_snippet: Fragmento de código (opcional)
-
-        Returns:
-            True si se envió exitosamente
-        """
-        risk_emoji = "🔴" if risk_level >= 75 else "🟠" if risk_level >= 50 else "🟡"
-
-        message = (
-            f"{risk_emoji} <b>Vulnerabilidad Detectada</b>\n\n"
-            f"<b>Repositorio:</b> {repository}\n"
-            f"<b>PR:</b> #{pr_number}\n"
-            f"<b>Archivo:</b> <code>{file}</code>\n"
-            f"<b>Línea:</b> {line}\n"
-            f"<b>Nivel de Riesgo:</b> {risk_level}%\n"
-        )
-
-        if code_snippet:
-            # Limitar tamaño del snippet
-            snippet = code_snippet[:100]
-            if len(code_snippet) > 100:
-                snippet += "..."
-            message += f"\n<b>Código:</b>\n<code>{snippet}</code>"
-
-        message += f"\n\n<b>Hora:</b> {datetime.utcnow().isoformat()}Z"
-
-        return self.send_message(message)
-
-    def notify_report(
-        self,
-        pr_number: int,
-        repository: str,
-        report_json: dict,  # type: ignore
-    ) -> bool:
-        """
-        Envía resumen del reporte de seguridad.
-
-        Args:
-            pr_number: Número del PR
-            repository: Nombre del repositorio
-            report_json: Diccionario con el reporte
-
-        Returns:
-            True si se envió exitosamente
-        """
-        summary = report_json.get("summary", {})
-        total = summary.get("total_fragments", 0)
-        vulnerable = summary.get("vulnerable_count", 0)
-        safe = summary.get("safe_count", 0)
-        risk = summary.get("overall_risk_percentage", 0)
-        decision = summary.get("overall_decision", "DESCONOCIDO")
-
-        emoji = "🚫" if decision == "RECHAZAR" else "✅"
-
-        message = (
-            f"{emoji} <b>Reporte de Seguridad - PR #{pr_number}</b>\n\n"
-            f"<b>Repositorio:</b> {repository}\n"
-            f"<b>Decisión Final:</b> {decision}\n"
-            f"<b>Riesgo General:</b> {risk:.1f}%\n\n"
-            f"<b>Estadísticas:</b>\n"
-            f"  • Total de fragmentos: {total}\n"
-            f"  • Seguros: {safe} ✓\n"
-            f"  • Vulnerables: {vulnerable} ✗\n\n"
-            f"<b>Timestamp:</b> {report_json.get('timestamp', 'N/A')}"
         )
 
         return self.send_message(message)
