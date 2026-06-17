@@ -27,6 +27,49 @@ def _shannon_entropy(text: str) -> float:
     return -sum((f / n) * math.log2(f / n) for f in freq.values())
 
 
+# ── Vulnerability type inference patterns ──
+_PAT_JNDI = re.compile(
+    r'(InitialContext|Context)\.\s*(lookup|search|list)\s*\(',
+    re.IGNORECASE,
+)
+_PAT_XXE = re.compile(
+    r'DocumentBuilderFactory\.newInstance\s*\('
+    r'|XMLReader\s*\('
+    r'|SAXBuilder\s*\('
+    r'|SAXParser\s*\(',
+    re.IGNORECASE,
+)
+_PAT_XSS = re.compile(
+    r'(PrintWriter|println)\s*\([^)]*getParameter',
+    re.IGNORECASE | re.DOTALL,
+)
+_PAT_LDAP = re.compile(
+    r'(DirContext|InitialDirContext|LdapContext)\.\s*(search|lookup)\s*\(',
+    re.IGNORECASE,
+)
+
+
+def _infer_vulnerability_type(code: str, feat_dict: dict) -> dict:
+    types = []
+    checks = [
+        ('SQL Injection', feat_dict.get('sql_raw_concat', 0) or feat_dict.get('sql_fstring', 0)),
+        ('Command Injection', feat_dict.get('subprocess_shell', 0) or feat_dict.get('os_commands', 0)),
+        ('Path Traversal', feat_dict.get('path_concat', 0)),
+        ('Insecure Deserialization', feat_dict.get('pickle_usage', 0)),
+        ('Weak Cryptography', feat_dict.get('weak_hash', 0) or feat_dict.get('insecure_random', 0)),
+        ('JNDI Injection', 1 if _PAT_JNDI.search(code) else 0),
+        ('XXE (XML External Entity)', 1 if _PAT_XXE.search(code) else 0),
+        ('Cross-Site Scripting (XSS)', 1 if _PAT_XSS.search(code) else 0),
+        ('LDAP Injection', 1 if _PAT_LDAP.search(code) else 0),
+    ]
+    types = [(name, score) for name, score in checks if score > 0]
+    types.sort(key=lambda x: -x[1])
+    return {
+        'primary_type': types[0][0] if types else 'Ninguno',
+        'all_types': [t[0] for t in types],
+    }
+
+
 _PAT_SANITIZATION = re.compile(
     r'\b(escape|sanitize|sanitise|is_valid|validate|clean|purify|'
     r'strip_tags|bleach|html\.escape|markupsafe|'
@@ -144,11 +187,46 @@ class SecurityGate:
                 "probability_vulnerable": 0.5,
                 "risk_level": 50,
                 "decision": "REVISAR",
+                "guard_triggered": False,
                 "features_criticas": {},
+                "vulnerability_type": "Ninguno",
+                "vulnerability_types": [],
             }
 
         try:
-            X, feat_dict = self._build_feature_matrix(code)
+            feat_dict = extraer_features_codigo(code)
+            vuln_info = _infer_vulnerability_type(code, feat_dict)
+
+            # Guardia: sin patrones peligrosos → SEGURO sin pasar por el modelo
+            _danger_keys = [
+                'sql_raw_concat', 'sql_fstring', 'subprocess_shell', 'os_commands',
+                'path_concat', 'pickle_usage', 'weak_hash', 'insecure_random',
+                'dangerous_func_calls',
+            ]
+            if all(feat_dict.get(k, 0) == 0 for k in _danger_keys) and feat_dict.get('total_danger_score', 0) == 0:
+                logger.info("Guard triggered: no dangerous patterns → SEGURO")
+                return {
+                    "prediction": "SEGURO",
+                    "probability_safe": 1.0,
+                    "probability_vulnerable": 0.0,
+                    "risk_level": 0,
+                    "decision": "ACEPTAR",
+                    "guard_triggered": True,
+                    "features_criticas": {
+                        "danger_score": feat_dict.get("total_danger_score", 0),
+                        "safety_score": feat_dict.get("total_safety_score", 0),
+                        "ast_depth": feat_dict.get("ast_depth", 0),
+                        "dangerous_calls": feat_dict.get("dangerous_func_calls", 0),
+                        "sql_raw": feat_dict.get("sql_raw_concat", 0),
+                        "cmd_injection": feat_dict.get("subprocess_shell", 0),
+                        "path_traversal": feat_dict.get("path_concat", 0),
+                        "sanitization": feat_dict.get("sanitization_present", 0),
+                    },
+                    "vulnerability_type": vuln_info['primary_type'],
+                    "vulnerability_types": vuln_info['all_types'],
+                }
+
+            X, _ = self._build_feature_matrix(code)
 
             prediction = self.model.predict(X)[0]
             probabilities = self.model.predict_proba(X)[0]
@@ -164,6 +242,7 @@ class SecurityGate:
                 "probability_vulnerable": round(prob_vulnerable, 4),
                 "risk_level": risk_level,
                 "decision": "RECHAZAR" if prediction == 1 else "ACEPTAR",
+                "guard_triggered": False,
                 "features_criticas": {
                     "danger_score": feat_dict.get("total_danger_score", 0),
                     "safety_score": feat_dict.get("total_safety_score", 0),
@@ -174,9 +253,11 @@ class SecurityGate:
                     "path_traversal": feat_dict.get("path_concat", 0),
                     "sanitization": feat_dict.get("sanitization_present", 0),
                 },
+                "vulnerability_type": vuln_info['primary_type'],
+                "vulnerability_types": vuln_info['all_types'],
             }
 
-            logger.info(f"Prediction: {prediction_label} (risk: {risk_level}%, danger_score: {feat_dict.get('total_danger_score', 0)})")
+            logger.info(f"Prediction: {prediction_label} (risk: {risk_level}%, type: {vuln_info['primary_type']})")
             return result
 
         except Exception as e:

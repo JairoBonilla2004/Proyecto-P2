@@ -154,9 +154,19 @@ jobs:
                 const prob = ((p.probability_vulnerable || 0) * 100).toFixed(1);
                 const file = p.file || 'N/A';
                 const line = p.line || 'N/A';
-                detailRows += `| ${file} | L${line} | VULNERABLE | ${prob}% |\n`;
+                const vtype = p.vulnerability_type || 'N/A';
+                detailRows += `| ${file} | L${line} | ${vtype} | ${prob}% |\n`;
               }
             });
+
+            // Vulnerabilidad types resumen
+            let allVulnTypes = new Set();
+            preds.forEach(p => {
+              if (p.prediction === 'VULNERABLE' && p.vulnerability_types) {
+                p.vulnerability_types.forEach(t => allVulnTypes.add(t));
+              }
+            });
+            const vulnTypesStr = allVulnTypes.size > 0 ? [...allVulnTypes].join(', ') : 'N/A';
 
             let body = [
               `${icon} **Análisis de Seguridad con Modelo ML**`,
@@ -166,14 +176,15 @@ jobs:
               `| Fragmentos analizados | ${summary.total_fragments || 0} |`,
               `| Seguros | ${summary.safe_count || 0} |`,
               `| Vulnerables | ${summary.vulnerable_count || 0} |`,
+              `| Tipo(s) detectado(s) | ${vulnTypesStr} |`,
               `| Nivel de riesgo | ${summary.overall_risk_percentage || 0}% |`,
               `| **Decisión** | **${decision}** |`,
             ].join('\n');
 
             if (detailRows) {
               body += '\n\n### 🔴 Vulnerabilidades Detectadas\n';
-              body += '| Archivo | Línea | Clasificación | Probabilidad |\n';
-              body += '|---------|-------|---------------|--------------|\n';
+              body += '| Archivo | Línea | Tipo | Probabilidad |\n';
+              body += '|---------|-------|------|--------------|\n';
               body += detailRows;
             }
 

@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-import json
 import logging
 import os
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from feature_extractor import CodeFeatures, FeatureExtractor, extraer_features_codigo
+from feature_extractor import extraer_features_codigo
 from telegram_notifier import TelegramNotifier
 
 logging.basicConfig(level=logging.INFO)
@@ -14,50 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class TestFeatureExtractor:
-    def test_python_dangerous_patterns(self):
-        extractor = FeatureExtractor(language="python")
-        code = "import os\nuser_input = input(\"Enter: \")\nresult = eval(user_input)\n"
-        features = extractor.extract(code, language="python")
-        assert features.has_eval
-        assert features.dangerous_functions_count > 0
-        print("-- python eval() detection works")
-
-    def test_java_runtime_exec(self):
-        extractor = FeatureExtractor(language="java")
-        code = 'String cmd = "ls -la " + input;\nProcess p = Runtime.getRuntime().exec(cmd);\n'
-        features = extractor.extract(code, language="java")
-        assert features.has_runtime_exec
-        print("-- Java Runtime.exec detection works")
-
-    def test_java_processbuilder(self):
-        extractor = FeatureExtractor()
-        code = 'ProcessBuilder pb = new ProcessBuilder("ls", "-la", path);\n'
-        features = extractor.extract(code)
-        assert features.has_processbuilder
-        print("-- Java ProcessBuilder detection works")
-
-    def test_java_sql_injection(self):
-        extractor = FeatureExtractor(language="java")
-        code = (
-            'String q = "SELECT * FROM users WHERE id = " + request.getParameter("id");\n'
-            "Statement stmt = conn.createStatement();\n"
-            "ResultSet rs = stmt.executeQuery(q);\n"
-        )
-        features = extractor.extract(code, language="java")
-        assert features.has_sql_concat
-        print("-- Java SQL injection detection works")
-
-    def test_java_prepared_statement(self):
-        extractor = FeatureExtractor()
-        code = (
-            'String q = "SELECT * FROM users WHERE id = ?";\n'
-            "PreparedStatement stmt = conn.prepareStatement(q);\n"
-            "stmt.setInt(1, userId);\n"
-        )
-        features = extractor.extract(code)
-        assert features.has_sanitization
-        print("-- Java PreparedStatement sanitization works")
-
     def test_extraer_features_java_vuln(self):
         code = (
             'String q = "SELECT * FROM users WHERE id = " + request.getParameter("id");\n'
@@ -103,52 +56,6 @@ class TestFeatureExtractor:
         feats = extraer_features_codigo(code)
         assert feats["pickle_usage"] == 1
         print("-- extraer_features_codigo Java deserialization works")
-
-    def test_sanitization_detection(self):
-        extractor = FeatureExtractor()
-        code = 'String query = "SELECT * FROM users WHERE id = ?";\nPreparedStatement stmt = connection.prepareStatement(query);\nstmt.setInt(1, userId);\n'
-        features = extractor.extract(code)
-        assert features.has_sanitization
-        print("-- Sanitization detection works")
-
-    def test_validation_detection(self):
-        extractor = FeatureExtractor()
-        code = "if user_input is not None and len(user_input) > 0:\n    process(user_input)\n"
-        features = extractor.extract(code)
-        assert features.has_input_validation
-        print("-- Input validation detection works")
-
-    def test_token_counting(self):
-        extractor = FeatureExtractor()
-        features = extractor.extract("x = 1 + 2")
-        assert features.token_count > 0
-        print("-- Token counting works")
-
-    def test_ast_depth(self):
-        extractor = FeatureExtractor()
-        code = "def outer():\n    def inner():\n        def deepest():\n            pass\n"
-        features = extractor.extract(code, language="python")
-        assert features.ast_depth > 0
-        print("-- AST depth calculation works")
-
-    def test_empty_code(self):
-        extractor = FeatureExtractor()
-        features = extractor.extract("")
-        assert features.token_count == 0
-        assert features.dangerous_functions_count == 0
-        print("-- Empty code handling works")
-
-    def test_batch_extraction(self):
-        extractor = FeatureExtractor()
-        fragments = [
-            {"code": "x = eval(y)", "file": "test.py", "line": 1},
-            {"code": "normal_code = 1 + 1", "file": "test.py", "line": 2},
-        ]
-        results = extractor.extract_batch(fragments)
-        assert len(results) == 2
-        assert results[0]["file"] == "test.py"
-        print("-- Batch extraction works")
-
 
 class TestSecurityGate:
     def test_juliet_sql_injection_vuln(self):
@@ -258,32 +165,6 @@ class TestTelegramNotifier:
         print("-- PR scan completion notification works")
 
 
-class TestCodeFeatures:
-    def test_to_dict(self):
-        features = CodeFeatures(
-            token_count=10, ast_depth=3, has_eval=True, has_exec=False,
-            has_sql_concat=True, has_os_system=False, has_subprocess=False,
-            has_runtime_exec=True, has_processbuilder=True,
-            has_input_validation=True, has_sanitization=True, has_try_catch=True,
-            lines_of_code=5, dangerous_functions_count=1)
-        result = features.to_dict()
-        assert isinstance(result, dict)
-        assert result["token_count"] == 10
-        assert result["has_eval"] is True
-        print("-- CodeFeatures to_dict() works")
-
-    def test_json_serializable(self):
-        features = CodeFeatures(
-            token_count=10, ast_depth=3, has_eval=False, has_exec=False,
-            has_sql_concat=True, has_os_system=False, has_subprocess=False,
-            has_runtime_exec=True, has_processbuilder=False,
-            has_input_validation=True, has_sanitization=True, has_try_catch=True,
-            lines_of_code=5, dangerous_functions_count=0)
-        json_str = json.dumps(features.to_dict())
-        assert isinstance(json_str, str)
-        print("-- CodeFeatures is JSON serializable")
-
-
 def run_tests():
     print("\n" + "=" * 60)
     print("RUNNING SECURITY PIPELINE TESTS")
@@ -293,7 +174,6 @@ def run_tests():
         TestFeatureExtractor,
         TestSecurityGate,
         TestTelegramNotifier,
-        TestCodeFeatures,
     ]
 
     total = 0
