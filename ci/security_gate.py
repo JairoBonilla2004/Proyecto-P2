@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import json
 import logging
-import math
 import re
 import sys
 from datetime import datetime
@@ -15,16 +14,6 @@ from scipy.sparse import csr_matrix, hstack
 from feature_extractor import extraer_features_codigo
 
 logger = logging.getLogger(__name__)
-
-
-def _shannon_entropy(text: str) -> float:
-    if not text:
-        return 0.0
-    freq: dict = {}
-    for c in text:
-        freq[c] = freq.get(c, 0) + 1
-    n = len(text)
-    return -sum((f / n) * math.log2(f / n) for f in freq.values())
 
 
 # ── Vulnerability type inference patterns ──
@@ -68,59 +57,6 @@ def _infer_vulnerability_type(code: str, feat_dict: dict) -> dict:
         'primary_type': types[0][0] if types else 'Ninguno',
         'all_types': [t[0] for t in types],
     }
-
-
-_PAT_SANITIZATION = re.compile(
-    r'\b(escape|sanitize|sanitise|is_valid|validate|clean|purify|'
-    r'strip_tags|bleach|html\.escape|markupsafe|'
-    r'parameterize|prepared_statement|placeholder|'
-    r'allowed_extensions|whitelist|ALLOWED|safe_path|realpath|'
-    r'compare_digest|escape_filter_chars|defusedxml|'
-    r'safe_load|create_default_context|token_urlsafe|secrets\.)'
-    r'|HtmlUtils\.htmlEscape'
-    r'|StringEscapeUtils'
-    r'|ESAPI\.encoder'
-    r'|encoder\.(encodeFor|canonicalize)'
-    r'|Pattern\.quote',
-    re.IGNORECASE,
-)
-_PAT_SQL_PARAM = re.compile(
-    r'\.execute\s*\(\s*[\'"][^\'"]*(\?|%s|:param|:\w+)[\'"]'
-    r'|PreparedStatement\b'
-    r'|\?\s*\)',
-    re.IGNORECASE,
-)
-_PAT_ENV_VARS = re.compile(
-    r'os\.environ\.(get|__getitem__)\s*\('
-    r'|System\.getenv\s*\('
-    r'|System\.getProperty\s*\(',
-    re.IGNORECASE,
-)
-_PAT_TYPE_VALID = re.compile(
-    r'isinstance\s*\(|type\s*\(\w+\)\s*==|assert\s+'
-    r'|\binstanceof\b'
-    r'|Pattern\.matches\s*\(',
-    re.IGNORECASE,
-)
-_PAT_EXCEPTIONS = re.compile(
-    r'\btry\s*:.*?\bexcept\b'
-    r'|\btry\s*\{'
-    r'|\bcatch\s*\(',
-    re.IGNORECASE | re.DOTALL,
-)
-_PAT_SECURE_IMPORTS = re.compile(
-    r'import\s+(bcrypt|argon2|cryptography|secrets|hmac|defusedxml|bleach)'
-    r'|import\s+org\.owasp'
-    r'|import\s+org\.springframework\.security'
-    r'|import\s+javax\.crypto'
-    r'|import\s+java\.security',
-    re.IGNORECASE,
-)
-_PAT_STR_CONCAT = re.compile(r"""['"][^'"]*['"]\s*\+|\+\s*['"][^'"]*['"]""")
-_PAT_SEC_COMMENTS = re.compile(
-    r'(#|//|/\*).*(segur|safe|valid|sanitiz|escape|authen|authori|permis|FIX|TODO|XXX)',
-    re.IGNORECASE,
-)
 
 
 class SecurityGate:

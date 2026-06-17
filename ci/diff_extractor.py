@@ -121,10 +121,6 @@ class DiffExtractor:
         )
         return result.stdout
 
-    def get_diff(self) -> str:
-        """Obtiene el diff entre branches (compatibilidad hacia atrás)."""
-        return self._get_diff_with_fallback()
-
     def extract_modified_files(self) -> list[dict]:
         """
         Extrae los archivos modificados del diff.

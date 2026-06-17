@@ -49,6 +49,7 @@ test:
 
 lint:
 	@echo "Running code quality checks..."
+	@echo "⚠️  Lint tools (pylint, black, mypy) not in requirements.txt — install manually if needed"
 	cd $(CI_DIR) && \
 		$(PYTHON) -m pylint *.py --disable=all --enable=E,F 2>/dev/null || true && \
 		$(PYTHON) -m black --check *.py 2>/dev/null || true && \

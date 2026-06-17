@@ -90,27 +90,6 @@ _PAT_DESERIALIZATION_JJ = re.compile(
     r'|new\s+ObjectInputStream',
     re.IGNORECASE,
 )
-_PAT_JNDI_LOOKUP_JJ = re.compile(
-    r'(InitialContext|Context)\.\s*(lookup|search|list)\s*\(',
-    re.IGNORECASE,
-)
-_PAT_XXE_JJ = re.compile(
-    r'DocumentBuilderFactory\.newInstance\s*\('
-    r'|XMLReader\s*\('
-    r'|SAXBuilder\s*\('
-    r'|SAXParser\s*\('
-    r'|XPath\.\s*evaluate\s*\(',
-    re.IGNORECASE,
-)
-_PAT_XSS_JJ = re.compile(
-    r'(PrintWriter|println)\s*\([^)]*getParameter',
-    re.IGNORECASE | re.DOTALL,
-)
-_PAT_LDAP_JJ = re.compile(
-    r'(DirContext|InitialDirContext|LdapContext)\.\s*(search|lookup)\s*\(',
-    re.IGNORECASE,
-)
-
 # ── Shared patterns ──
 _PAT_SANITIZATION = re.compile(
     r'\b(escape|sanitize|sanitise|is_valid|validate|clean|purify|'
@@ -233,7 +212,7 @@ def extraer_features_codigo(codigo: str) -> dict:
         features["subprocess_any"] = 1 if re.search(r'\bProcessBuilder\b', codigo, re.IGNORECASE) else 0
         features["os_commands"] = 1 if _PAT_CMD_EXEC_JJ.search(codigo) or re.search(r'\bProcessBuilder\b', codigo, re.IGNORECASE) else 0
         features["sql_raw_concat"] = 1 if _PAT_SQL_CONCAT_JJ.search(codigo) else 0
-        features["sql_fstring"] = 1 if _PAT_SQL_CONCAT_JJ.search(codigo) else 0
+        features["sql_fstring"] = 0  # Java no tiene f-strings
         features["pickle_usage"] = 1 if _PAT_DESERIALIZATION_JJ.search(codigo) else 0
         features["path_concat"] = 1 if _PAT_PATH_TRAVERSAL_JJ.search(codigo) else 0
         features["weak_hash"] = 1 if _PAT_WEAK_CRYPTO_JJ.search(codigo) else 0

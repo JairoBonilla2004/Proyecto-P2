@@ -138,7 +138,7 @@ modelo/model_artifacts/
 python ci/tests.py
 ```
 
-Resultado esperado: **28/28 tests pasando** (FeatureExtractor + SecurityGate + TelegramNotifier + CodeFeatures).
+Resultado esperado: **15/15 tests pasando** (FeatureExtractor + SecurityGate + TelegramNotifier).
 
 ---
 
@@ -205,7 +205,7 @@ Proyecto-P2/
     security_pipeline.py      # Orquestador del pipeline
     diff_extractor.py         # Extracción de diff del PR
     telegram_notifier.py      # Notificaciones Telegram
-    tests.py                  # Tests (28 tests)
+    tests.py                  # Tests (15 tests)
     requirements.txt          # Dependencias Python
   modelo/
     train_model.py            # Entrenamiento del modelo

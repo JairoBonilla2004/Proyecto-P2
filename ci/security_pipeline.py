@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import sys
-from pathlib import Path
 from typing import Optional
 
 from diff_extractor import DiffExtractor
@@ -37,8 +36,8 @@ class SecurityPipeline:
         self,
         base_branch: str = "main",
         head_branch: str = "HEAD",
-        model_path: str = "modelo/model_artifacts",
-        report_path: str = "reports/security_report.json",
+        model_path: str = "../modelo/model_artifacts",
+        report_path: str = "../reports/security_report.json",
     ):
         """
         Inicializa el pipeline.

@@ -66,19 +66,6 @@ jobs:
             echo "✅ Model artifacts found"
           fi
 
-      - name: "Notificar Telegram: Inicio de revisión de seguridad"
-        shell: bash
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d parse_mode="HTML" \
-              -d text="🔍 <b>Inicio de Revisión de Seguridad</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A<b>Rama origen:</b> ${{ github.head_ref }}%0A<b>Rama destino:</b> ${{ github.base_ref }}" || true
-          fi
-
       - name: Run AI vulnerability detection
         id: security
         shell: bash
@@ -244,34 +231,6 @@ jobs:
               ].join('\n'),
               labels: ['fixing-required']
             });
-
-      - name: "Notificar Telegram: resultado clasificación (VULNERABLE)"
-        if: steps.parse.outputs.decision == 'RECHAZAR'
-        shell: bash
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d parse_mode="HTML" \
-              -d text="🚫 <b>PR RECHAZADO — Vulnerabilidad Detectada</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A<b>Fragmentos vulnerables:</b> ${{ steps.parse.outputs.vulnerable_count }}%0A<b>Nivel de riesgo:</b> ${{ steps.parse.outputs.risk }}%%0A%0A⛔ El merge ha sido bloqueado. Se creó una issue automática y se aplicó la etiqueta fixing-required." || true
-          fi
-
-      - name: "Notificar Telegram: resultado clasificación (SEGURO)"
-        if: steps.parse.outputs.decision != 'RECHAZAR'
-        shell: bash
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d parse_mode="HTML" \
-              -d text="✅ <b>Código Clasificado como SEGURO</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A<b>Nivel de riesgo:</b> ${{ steps.parse.outputs.risk }}%%0A%0A➡️ Continuando con merge a test y ejecución de pruebas..." || true
-          fi
 
       - name: "Bloquear merge si VULNERABLE"
         if: steps.parse.outputs.decision == 'RECHAZAR'
