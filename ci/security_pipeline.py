@@ -92,37 +92,6 @@ class SecurityPipeline:
                 )
             raise
 
-    def extract_features(
-        self, code_fragments: list[dict]
-    ) -> list[dict]:
-        """
-        Extrae features de los fragmentos.
-
-        Returns:
-            Lista de resultados con features
-        """
-        logger.info("Step 2: Extracting features from code fragments")
-
-        if not code_fragments:
-            logger.warning("No code fragments to analyze")
-            return []
-
-        try:
-            results = self.feature_extractor.extract_batch(code_fragments)
-            logger.info(f"Features extracted for {len(results)} fragments")
-
-            return results
-
-        except Exception as e:
-            logger.error(f"Error extracting features: {e}")
-            if self.telegram_notifier:
-                self.telegram_notifier.notify_error(
-                    pr_number=self._get_pr_number(),
-                    repository=self._get_repository_name(),
-                    error_message=f"Failed to extract features: {e}",
-                )
-            raise
-
     def predict_security(
         self, code_fragments: list[str]
     ) -> list[dict]:  # type: ignore
