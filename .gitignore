@@ -23,5 +23,7 @@ __pycache__/
 .idea/
 .DS_Store
 
+modelo/Juliet_Java
+
 #archivos env
 .env

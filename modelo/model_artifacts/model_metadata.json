@@ -1,58 +1,15 @@
 {
-  "nombre_modelo": "CVEFixes_VulnerabilityClassifier_v1",
-  "version": "1.0.0",
-  "fecha_entrenamiento": "2026-06-14T16:37:50.782506",
-  "dataset": "CVEFixes (simulado)",
+  "nombre_modelo": "Juliet_Java_VulnerabilityClassifier_v2",
+  "version": "2.0.0",
+  "fecha_entrenamiento": "2026-06-16T21:16:41.423513",
+  "dataset": "Juliet Test Suite for Java v1.3",
   "tipo_modelo": "Ensemble (RandomForest + XGBoost, VotingSoft)",
-  "metricas_validacion_cruzada": {
+  "total_muestras": 17612,
+  "balanceo": "SMOTE via ImbPipeline (sin leakage)",
+  "validacion_cruzada": {
     "cv_folds": 5,
-    "accuracy_mean": 0.4939,
-    "f1_mean": 0.4684,
-    "roc_auc_mean": 0.4997,
     "umbral_requerido": 0.82,
-    "cumple_umbral": false
-  },
-  "features": {
-    "tfidf_features": 8000,
-    "structural_features": 28,
-    "selected_features": 3000,
-    "balanceo": "SMOTE(k_neighbors=5)"
-  },
-  "artefactos": [
-    "modelo_ensemble",
-    "vectorizador_tfidf",
-    "selector_features",
-    "scaler_estructural"
-  ],
-  "lista_features_estructurales": [
-    "ast_depth",
-    "ast_node_count",
-    "ast_parse_error",
-    "func_calls_count",
-    "cyclomatic_complexity",
-    "dangerous_func_calls",
-    "subprocess_shell",
-    "subprocess_any",
-    "os_commands",
-    "sql_raw_concat",
-    "sql_fstring",
-    "pickle_usage",
-    "path_concat",
-    "weak_hash",
-    "insecure_random",
-    "sanitization_present",
-    "sql_parameterized",
-    "env_vars_used",
-    "type_validation",
-    "exception_handling",
-    "secure_imports",
-    "shannon_entropy",
-    "lines_count",
-    "string_concat_count",
-    "security_comments",
-    "raise_count",
-    "total_danger_score",
-    "total_safety_score"
-  ],
-  "instrucciones_inferencia": "Para predecir: (1) extraer_features_codigo(codigo) → dict, (2) scaler.transform(dict_to_array), (3) vectorizador.transform([codigo]), (4) hstack([tfidf, struct_scaled]), (5) selector.transform(X_combined), (6) modelo_ensemble.predict(X_sel)"
-}
+    "accuracy_mean": 0.9999,
+    "f1_mean": 0.9999,
+    "roc_auc_mean": 1.0,
+    "cumple_umbral": 
