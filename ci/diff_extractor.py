@@ -45,20 +45,7 @@ class DiffExtractor:
 
     # Extensiones de código a analizar
     CODE_EXTENSIONS = {
-        ".py",
         ".java",
-        ".js",
-        ".ts",
-        ".jsx",
-        ".tsx",
-        ".go",
-        ".rs",
-        ".cpp",
-        ".c",
-        ".cs",
-        ".php",
-        ".rb",
-        ".sql",
     }
 
     def __init__(self, base_branch: str = "main", head_branch: Optional[str] = None):
