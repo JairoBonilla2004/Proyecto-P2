@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import sys
-from pathlib import Path
 from typing import Optional
 
 from diff_extractor import DiffExtractor
@@ -37,8 +36,8 @@ class SecurityPipeline:
         self,
         base_branch: str = "main",
         head_branch: str = "HEAD",
-        model_path: str = "modelo/model_artifacts",
-        report_path: str = "reports/security_report.json",
+        model_path: str = "../modelo/model_artifacts",
+        report_path: str = "../reports/security_report.json",
     ):
         """
         Inicializa el pipeline.
@@ -89,37 +88,6 @@ class SecurityPipeline:
                     pr_number=self._get_pr_number(),
                     repository=self._get_repository_name(),
                     error_message=f"Failed to extract code: {e}",
-                )
-            raise
-
-    def extract_features(
-        self, code_fragments: list[dict]
-    ) -> list[dict]:
-        """
-        Extrae features de los fragmentos.
-
-        Returns:
-            Lista de resultados con features
-        """
-        logger.info("Step 2: Extracting features from code fragments")
-
-        if not code_fragments:
-            logger.warning("No code fragments to analyze")
-            return []
-
-        try:
-            results = self.feature_extractor.extract_batch(code_fragments)
-            logger.info(f"Features extracted for {len(results)} fragments")
-
-            return results
-
-        except Exception as e:
-            logger.error(f"Error extracting features: {e}")
-            if self.telegram_notifier:
-                self.telegram_notifier.notify_error(
-                    pr_number=self._get_pr_number(),
-                    repository=self._get_repository_name(),
-                    error_message=f"Failed to extract features: {e}",
                 )
             raise
 

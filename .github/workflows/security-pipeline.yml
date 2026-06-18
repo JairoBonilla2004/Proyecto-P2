@@ -28,7 +28,6 @@ jobs:
     name: "Etapa 1: Revisión de Seguridad con Modelo ML"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Solo ejecutar si el PR viene de la rama dev
     if: github.head_ref == 'dev'
 
     outputs:
@@ -64,19 +63,6 @@ jobs:
             cd ci && python3 create_dummy_model.py || echo "No se pudo crear modelo dummy"
           else
             echo "✅ Model artifacts found"
-          fi
-
-      - name: "Notificar Telegram: Inicio de revisión de seguridad"
-        shell: bash
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d parse_mode="HTML" \
-              -d text="🔍 <b>Inicio de Revisión de Seguridad</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A<b>Rama origen:</b> ${{ github.head_ref }}%0A<b>Rama destino:</b> ${{ github.base_ref }}" || true
           fi
 
       - name: Run AI vulnerability detection
@@ -146,7 +132,6 @@ jobs:
             const isVulnerable = decision === 'RECHAZAR';
             const icon = isVulnerable ? '🚫' : '✅';
 
-            // Construir tabla de predicciones detalladas
             let detailRows = '';
             const preds = report.predictions || [];
             preds.forEach((p, i) => {
@@ -154,9 +139,18 @@ jobs:
                 const prob = ((p.probability_vulnerable || 0) * 100).toFixed(1);
                 const file = p.file || 'N/A';
                 const line = p.line || 'N/A';
-                detailRows += `| ${file} | L${line} | VULNERABLE | ${prob}% |\n`;
+                const vtype = p.vulnerability_type || 'N/A';
+                detailRows += `| ${file} | L${line} | ${vtype} | ${prob}% |\n`;
               }
             });
+
+            let allVulnTypes = new Set();
+            preds.forEach(p => {
+              if (p.prediction === 'VULNERABLE' && p.vulnerability_types) {
+                p.vulnerability_types.forEach(t => allVulnTypes.add(t));
+              }
+            });
+            const vulnTypesStr = allVulnTypes.size > 0 ? [...allVulnTypes].join(', ') : 'N/A';
 
             let body = [
               `${icon} **Análisis de Seguridad con Modelo ML**`,
@@ -166,14 +160,15 @@ jobs:
               `| Fragmentos analizados | ${summary.total_fragments || 0} |`,
               `| Seguros | ${summary.safe_count || 0} |`,
               `| Vulnerables | ${summary.vulnerable_count || 0} |`,
+              `| Tipo(s) detectado(s) | ${vulnTypesStr} |`,
               `| Nivel de riesgo | ${summary.overall_risk_percentage || 0}% |`,
               `| **Decisión** | **${decision}** |`,
             ].join('\n');
 
             if (detailRows) {
               body += '\n\n### 🔴 Vulnerabilidades Detectadas\n';
-              body += '| Archivo | Línea | Clasificación | Probabilidad |\n';
-              body += '|---------|-------|---------------|--------------|\n';
+              body += '| Archivo | Línea | Tipo | Probabilidad |\n';
+              body += '|---------|-------|------|--------------|\n';
               body += detailRows;
             }
 
@@ -199,7 +194,6 @@ jobs:
             const risk = '${{ steps.parse.outputs.risk }}';
             const vulnCount = '${{ steps.parse.outputs.vulnerable_count }}';
 
-            // Crear etiqueta si no existe
             try {
               await github.rest.issues.createLabel({
                 owner, repo,
@@ -207,16 +201,14 @@ jobs:
                 color: 'e11d48',
                 description: 'Vulnerabilidad detectada - corrección obligatoria'
               });
-            } catch (e) { /* etiqueta ya existe */ }
+            } catch (e) {}
 
-            // Aplicar etiqueta al PR
             await github.rest.issues.addLabels({
               owner, repo,
               issue_number: pr,
               labels: ['fixing-required']
             });
 
-            // Crear issue vinculada
             await github.rest.issues.create({
               owner, repo,
               title: `🔴 [SEGURIDAD] Vulnerabilidades detectadas en PR #${pr}`,
@@ -233,34 +225,6 @@ jobs:
               ].join('\n'),
               labels: ['fixing-required']
             });
-
-      - name: "Notificar Telegram: resultado clasificación (VULNERABLE)"
-        if: steps.parse.outputs.decision == 'RECHAZAR'
-        shell: bash
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d parse_mode="HTML" \
-              -d text="🚫 <b>PR RECHAZADO — Vulnerabilidad Detectada</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A<b>Fragmentos vulnerables:</b> ${{ steps.parse.outputs.vulnerable_count }}%0A<b>Nivel de riesgo:</b> ${{ steps.parse.outputs.risk }}%%0A%0A⛔ El merge ha sido bloqueado. Se creó una issue automática y se aplicó la etiqueta fixing-required." || true
-          fi
-
-      - name: "Notificar Telegram: resultado clasificación (SEGURO)"
-        if: steps.parse.outputs.decision != 'RECHAZAR'
-        shell: bash
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d parse_mode="HTML" \
-              -d text="✅ <b>Código Clasificado como SEGURO</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A<b>Nivel de riesgo:</b> ${{ steps.parse.outputs.risk }}%%0A%0A➡️ Continuando con merge a test y ejecución de pruebas..." || true
-          fi
 
       - name: "Bloquear merge si VULNERABLE"
         if: steps.parse.outputs.decision == 'RECHAZAR'
@@ -317,11 +281,7 @@ jobs:
       - name: Detect app directory
         shell: bash
         run: |
-          if [[ -f "Backend/Mueblerix/pom.xml" ]]; then
-            echo "APP_DIR=Backend/Mueblerix" >> "$GITHUB_ENV"
-          else
-            echo "APP_DIR=Backend/Mueblerix" >> "$GITHUB_ENV"
-          fi
+          echo "APP_DIR=Backend/Mueblerix" >> "$GITHUB_ENV"
 
       - name: Set up Java 21
         uses: actions/setup-java@v4
@@ -371,7 +331,7 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: "Aplicar etiqueta tests-failed y notificar Telegram si pruebas fallan"
+      - name: "Pruebas fallidas: Etiqueta y Telegram"
         if: steps.test-result.outputs.tests_passed == 'false'
         uses: actions/github-script@v7
         env:
@@ -383,7 +343,6 @@ jobs:
             const repo = context.repo.repo;
             const pr = context.issue.number;
 
-            // Crear etiqueta si no existe
             try {
               await github.rest.issues.createLabel({
                 owner, repo,
@@ -391,18 +350,15 @@ jobs:
                 color: 'f97316',
                 description: 'Pruebas fallidas en rama test'
               });
-            } catch (e) { /* ya existe */ }
+            } catch (e) {}
 
-            // Aplicar etiqueta
             await github.rest.issues.addLabels({ owner, repo, issue_number: pr, labels: ['tests-failed'] });
 
-            // Comentar en PR
             await github.rest.issues.createComment({
               owner, repo, issue_number: pr,
               body: '❌ **Pruebas fallidas en rama `test`**\n\nLas pruebas unitarias/integración no pasaron. El pipeline ha sido detenido. Revisa los [reportes de prueba](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) y corrige los errores.'
             });
 
-            // Notificar Telegram
             const token = process.env.TELEGRAM_BOT_TOKEN;
             const chatId = process.env.TELEGRAM_CHAT_ID;
             if (token && chatId) {
@@ -435,7 +391,7 @@ jobs:
           exit 1
 
 # ─────────────────────────────────────────────
-# ETAPA 3 — Merge a main + Despliegue
+# ETAPA 3 — Merge a main + Despliegue DockerHub & Render
 # ─────────────────────────────────────────────
   deploy-to-production:
     name: "Etapa 3: Merge a main + Despliegue en Producción"
@@ -467,11 +423,7 @@ jobs:
       - name: Detect app directory
         shell: bash
         run: |
-          if [[ -f "Backend/Mueblerix/pom.xml" && -f "Backend/Mueblerix/Dockerfile" ]]; then
-            echo "APP_DIR=Backend/Mueblerix" >> "$GITHUB_ENV"
-          else
-            echo "APP_DIR=Backend/Mueblerix" >> "$GITHUB_ENV"
-          fi
+          echo "APP_DIR=Backend/Mueblerix" >> "$GITHUB_ENV"
 
       - name: Compute image tag
         shell: bash
@@ -483,10 +435,10 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Login to DockerHub
-        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -497,13 +449,35 @@ jobs:
         continue-on-error: true
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         uses: docker/build-push-action@v6
         with:
           context: ${{ env.APP_DIR }}
           file: ${{ env.APP_DIR }}/Dockerfile
           push: ${{ secrets.DOCKERHUB_USERNAME != '' }}
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/proyecto-p2-backend:${{ env.TAG }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/proyecto-p2-backend:${{ env.TAG }},${{ secrets.DOCKERHUB_USERNAME }}/proyecto-p2-backend:latest
+
+      # ─── NUEVO PASO: DISPARAR EL DESPLIEGUE EN RENDER ───
+      - name: Trigger Render Deployment via Deploy Hook
+        id: render-deploy
+        if: steps.docker-build.outcome == 'success'
+        shell: bash
+        env:
+          RENDER_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [[ -n "$RENDER_HOOK" ]]; then
+            echo "🚀 Disparando el deploy hook de Render de manera segura..."
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$RENDER_HOOK")
+            if [[ "$RESPONSE" == "200" || "$RESPONSE" == "201" || "$RESPONSE" == "202" ]]; then
+              echo "✅ Render aceptó la orden de despliegue con código HTTP $RESPONSE"
+              echo "DEPLOY_STATUS=success" >> "$GITHUB_ENV"
+            else
+              echo "⚠️ Render devolvió un código inesperado: $RESPONSE"
+              echo "DEPLOY_STATUS=warning" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "❌ No se encontró la variable RENDER_DEPLOY_HOOK_URL en los secretos de GitHub."
+            exit 1
+          fi
 
       - name: "Notificar Telegram: despliegue exitoso"
         if: steps.docker-build.outcome == 'success'
@@ -516,7 +490,7 @@ jobs:
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
               -d parse_mode="HTML" \
-              -d text="🚀 <b>Despliegue en Producción Exitoso</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A<b>Imagen:</b> ${{ secrets.DOCKERHUB_USERNAME }}/proyecto-p2-backend:${{ env.TAG }}%0A%0A✅ Pipeline completado exitosamente. El código está en producción." || true
+              -d text="🚀 <b>Despliegue en Producción Exitoso</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A<b>Imagen DockerHub:</b> ${{ secrets.DOCKERHUB_USERNAME }}/proyecto-p2-backend:${{ env.TAG }}%0A%0A✅ Pipeline completado exitosamente. La imagen fue empujada y Render ha sido notificado para iniciar la actualización del servicio." || true
           fi
 
       - name: "Notificar Telegram: despliegue fallido"
@@ -530,7 +504,7 @@ jobs:
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
               -d parse_mode="HTML" \
-              -d text="❌ <b>Despliegue en Producción FALLIDO</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A%0A⚠️ El merge a main fue exitoso pero el build de Docker falló. Revisa los logs en GitHub Actions." || true
+              -d text="❌ <b>Despliegue en Producción FALLIDO</b>%0A%0A<b>PR:</b> #${{ github.event.pull_request.number }}%0A<b>Repositorio:</b> ${{ github.repository }}%0A%0A⚠️ El merge a main fue exitoso pero el build de Docker falló. Render no fue notificado para evitar inconsistencias." || true
           fi
 
       - name: "Comentar PR: despliegue completado"
@@ -539,12 +513,24 @@ jobs:
         with:
           script: |
             const outcome = '${{ steps.docker-build.outcome }}';
+            const deployStatus = process.env.DEPLOY_STATUS || 'not_executed';
             const tag = '${{ env.TAG }}';
-            const icon = outcome === 'success' ? '🚀' : '⚠️';
-            const status = outcome === 'success' ? 'Despliegue exitoso en producción' : 'Merge a main exitoso, pero el build de Docker falló';
+            
+            let status = 'Merge a main exitoso, pero el build de Docker falló';
+            let icon = '⚠️';
+            
+            if (outcome === 'success') {
+              icon = '🚀';
+              status = 'Despliegue exitoso. Imagen enviada a DockerHub y Webhook enviado a Render.';
+            }
+            
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `${icon} **${status}**\n\n| Campo | Valor |\n|-------|-------|\n| Tag | \`${tag}\` |\n| Rama | \`main\` |\n| Estado Docker | ${outcome} |`
+              body: `${icon} **${status}**\n\n| Campo | Valor |\n|-------|-------|\n| Tag Docker | \`${tag}\` |\n| Rama Destino | \`main\` |\n| Estado Docker | \`${outcome}\` |\n| Notificación Render | \`${deployStatus}\` |`
             });
+
+      - name: "Forzar fallo si Docker falló"
+        if: steps.docker-build.outcome == 'failure'
+        run: exit 1

@@ -1,327 +1,316 @@
 #!/usr/bin/env python3
-"""
-Módulo para extracción de características de código.
-
-Extrae features estáticas como tokens, profundidad AST, funciones peligrosas,
-y mecanismos de sanitización.
-"""
-
 import ast
 import logging
+import math
 import re
-from dataclasses import asdict, dataclass
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class CodeFeatures:
-    """Contenedor de features extraídas."""
+# ── Language detection ──
+_PAT_JAVA_DETECT = re.compile(
+    r'\b(public|private|protected|class\s+\w+|import\s+java\.'
+    r'|String\s+\w+\s*[=;]'
+    r'|(Statement|PreparedStatement|ResultSet|Connection)\s+\w+'
+    r'|System\.(out|getProperty|getenv)'
+    r'|Runtime\.|ProcessBuilder|ObjectInputStream'
+    r'|MessageDigest|FileInputStream|FileWriter'
+    r'|\.getInstance\s*\('
+    r'|\.getRuntime\s*\('
+    r'|throws\s+\w+'
+    r'|new\s+[A-Z]\w*[a-z]\w*\s*\('
+    r')',
+    re.IGNORECASE,
+)
 
-    token_count: int
-    ast_depth: int
-    has_eval: bool
-    has_exec: bool
-    has_sql_concat: bool
-    has_os_system: bool
-    has_subprocess: bool
-    has_runtime_exec: bool
-    has_processbuilder: bool
-    has_input_validation: bool
-    has_sanitization: bool
-    has_try_catch: bool
-    lines_of_code: int
-    dangerous_functions_count: int
+# ── Python patterns ──
+_PAT_DANGEROUS_PY = re.compile(
+    r'\b(eval|exec|execfile|compile|__import__|getattr|setattr|delattr)\s*\(',
+    re.IGNORECASE,
+)
+_PAT_SUBPROCESS_SHELL_PY = re.compile(
+    r'subprocess\.(call|run|Popen|check_output|check_call)\s*\([^)]*shell\s*=\s*True',
+    re.IGNORECASE | re.DOTALL,
+)
+_PAT_SUBPROCESS_ANY_PY = re.compile(
+    r'subprocess\.(call|run|Popen|check_output|check_call|getoutput)\s*\(',
+    re.IGNORECASE,
+)
+_PAT_OS_COMMANDS_PY = re.compile(
+    r'os\.(system|popen|execv|execve|execvp|execvpe|spawnv|spawnve)\s*\(',
+    re.IGNORECASE,
+)
+_PAT_SQL_RAW_PY = re.compile(
+    r'(\.execute\s*\([^?%]*(\+|%|format|f[\'"]|\{)|"\'\\s*\+\s*\w+\s*\+\s*"\')',
+    re.IGNORECASE,
+)
+_PAT_SQL_FSTRING_PY = re.compile(
+    r'(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|FROM|WHERE)[^;]*"\'\\s*(%|format|f\'|f")',
+    re.IGNORECASE,
+)
+_PAT_PATH_CONCAT_PY = re.compile(
+    r'(open|file)\s*\(\s*[\w\'"]+\s*\+\s*\w+', re.IGNORECASE
+)
+_PAT_WEAK_HASH_PY = re.compile(r'hashlib\.(md5|sha1)\s*\(', re.IGNORECASE)
 
-    def to_dict(self) -> dict:
-        """Convierte a diccionario."""
-        return asdict(self)
+# ── Java patterns ──
+_PAT_DANGEROUS_JJ = re.compile(
+    r'(Runtime\s*\.\s*(getRuntime|exec)\s*\('
+    r'|ProcessBuilder\s*\('
+    r'|Class\.forName\s*\('
+    r'|Method\s*\.\s*invoke\s*\('
+    r'|java\.lang\.reflect\.)',
+    re.IGNORECASE,
+)
+_PAT_CMD_EXEC_JJ = re.compile(
+    r'Runtime\s*\.\s*(?:getRuntime\s*\(\s*\)\s*\.\s*)?exec\s*\('
+    r'|\w+\.\s*(?:exec|start)\s*\(',
+    re.IGNORECASE,
+)
+_PAT_SQL_CONCAT_JJ = re.compile(
+    r'["\'](?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|EXEC|MERGE|CALL)'
+    r'[^"\']*["\']\s*\+',
+    re.IGNORECASE,
+)
+_PAT_PATH_TRAVERSAL_JJ = re.compile(
+    r'new\s+(File|FileInputStream|FileOutputStream|FileReader|FileWriter|RandomAccessFile)'
+    r'\s*\([^)]*(?:\+|getParameter|getHeader|getQueryString)',
+    re.IGNORECASE,
+)
+_PAT_WEAK_CRYPTO_JJ = re.compile(
+    r'MessageDigest\.getInstance\s*\(\s*["\'](MD5|SHA-1|SHA1|SHA)["\']'
+    r'|Cipher\.getInstance\s*\(\s*["\'].*?(DES|ECB)["\']'
+    r'|javax\.crypto\.'
+    r'|new\s+java\.util\.Random\s*\('
+    r'|Math\.random\s*\(',
+    re.IGNORECASE,
+)
+_PAT_DESERIALIZATION_JJ = re.compile(
+    r'(?:ObjectInputStream|readObject|readUnshared)\s*\.\s*(readObject|readUnshared)\s*\('
+    r'|new\s+ObjectInputStream',
+    re.IGNORECASE,
+)
+# ── Shared patterns ──
+_PAT_SANITIZATION = re.compile(
+    r'\b(escape|sanitize|sanitise|is_valid|validate|clean|purify|'
+    r'strip_tags|bleach|html\.escape|markupsafe|'
+    r'parameterize|prepared_statement|placeholder|'
+    r'allowed_extensions|whitelist|ALLOWED|safe_path|realpath|'
+    r'compare_digest|escape_filter_chars|defusedxml|'
+    r'safe_load|create_default_context|token_urlsafe|secrets\.)'
+    r'|HtmlUtils\.htmlEscape'
+    r'|StringEscapeUtils'
+    r'|ESAPI\.encoder'
+    r'|encoder\.(encodeFor|canonicalize)'
+    r'|Pattern\.quote',
+    re.IGNORECASE,
+)
+_PAT_SQL_PARAM = re.compile(
+    r'PreparedStatement\b'
+    r'|\?\s*\)'
+    r'|setString\s*\(\s*\d+\s*,'
+    r'|setInt\s*\(\s*\d+\s*,'
+    r'|setObject\s*\(\s*\d+\s*,'
+    r'|\.execute\s*\(\s*[\'"][^\'"]*(\?|%s|:param|:\w+)[\'"]',
+    re.IGNORECASE,
+)
+_PAT_ENV_VARS = re.compile(
+    r'os\.environ\.(get|__getitem__)\s*\('
+    r'|System\.getenv\s*\('
+    r'|System\.getProperty\s*\(',
+    re.IGNORECASE,
+)
+_PAT_TYPE_VALID = re.compile(
+    r'isinstance\s*\(|type\s*\(\w+\)\s*==|assert\s+'
+    r'|\binstanceof\b'
+    r'|Pattern\.matches\s*\(',
+    re.IGNORECASE,
+)
+_PAT_EXCEPTIONS = re.compile(
+    r'\btry\s*:.*?\bexcept\b'
+    r'|\btry\s*\{'
+    r'|\bcatch\s*\(',
+    re.IGNORECASE | re.DOTALL,
+)
+_PAT_SECURE_IMPORTS = re.compile(
+    r'import\s+(bcrypt|argon2|cryptography|secrets|hmac|defusedxml|bleach)'
+    r'|import\s+org\.owasp'
+    r'|import\s+org\.springframework\.security'
+    r'|import\s+javax\.crypto'
+    r'|import\s+java\.security',
+    re.IGNORECASE,
+)
+_PAT_STR_CONCAT = re.compile(r"""['"][^'"]*['"]\s*\+|\+\s*['"][^'"]*['"]""")
+_PAT_SEC_COMMENTS = re.compile(
+    r'(#|//|/\*).*(segur|safe|valid|sanitiz|escape|authen|authori|permis|FIX|TODO|XXX)',
+    re.IGNORECASE,
+)
+_PAT_SECURE_CRYPTO = re.compile(
+    r'MessageDigest\.getInstance\s*\(\s*["\']SHA-256["\']'
+    r'|MessageDigest\.getInstance\s*\(\s*["\']SHA-512["\']'
+    r'|Cipher\.getInstance\s*\(\s*["\'].*?AES.*?GCM["\']'
+    r'|SecureRandom\b'
+    r'|KeyGenerator\.getInstance\s*\(\s*["\']AES["\']'
+    r'|\b(secrets|hmac|defusedxml|bleach|bcrypt|argon2)\b',
+    re.IGNORECASE,
+)
 
 
-class FeatureExtractor:
-    """Extractor de características de código."""
+def _ast_depth_py(tree) -> int:
+    if not isinstance(tree, ast.AST):
+        return 0
+    children = list(ast.iter_child_nodes(tree))
+    if not children:
+        return 1
+    return 1 + max(_ast_depth_py(child) for child in children)
 
-    # Patrones para detectar funciones peligrosas (Python)
-    PYTHON_DANGEROUS_PATTERNS = {
-        "eval": r"\beval\s*\(",
-        "exec": r"\bexec\s*\(",
-        "os_system": r"\bos\s*\.\s*system\s*\(",
-        "subprocess_popen": r"\bsubprocess\s*\.\s*(Popen|call|run|check_output)\s*\(",
-        "compile": r"\bcompile\s*\(",
-        "pickle": r"\bpickle\s*\.\s*loads?\s*\(",
-    }
 
-    # Patrones para detectar funciones peligrosas (Java)
-    JAVA_DANGEROUS_PATTERNS = {
-        "runtime_exec": r"Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(",
-        "processbuilder": r"\bnew\s+ProcessBuilder\s*\(",
-        "sql_concat": r"\".*\"\s*\+\s*(?!.*\?)\s*(?:SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)",
-        "reflection": r"Class\s*\.\s*forName\s*\(",
-    }
+def _ast_depth_brace(code: str) -> int:
+    max_depth = 0
+    cur = 0
+    for ch in code:
+        if ch in '{(':
+            cur += 1
+            max_depth = max(max_depth, cur)
+        elif ch in '})':
+            cur = max(0, cur - 1)
+    return max_depth
 
-    # Patrones de sanitización
-    SANITIZATION_PATTERNS = {
-        "parameterized_query": r"\\\?",
-        "prepared_statement": r"PreparedStatement|parameterized",
-        "input_validation": r"(?:validate|check|verify|sanitize|escape)\s*\(",
-        "regex_validation": r"matches\s*\(|Pattern\s*\.\s*compile",
-    }
 
-    # Patrones de validación de entrada
-    VALIDATION_PATTERNS = {
-        "null_check": r"\s+(?:if|!=)\s+.*(?:null|None)\b",
-        "type_check": r"(?:isinstance|type)\s*\(\s*\w+\s*,",
-        "length_check": r"(?:len|length)\s*\(\s*\w+\s*\)\s*(?:>|<|==)",
-        "range_check": r"(?:\d+\s*<\s*\w+|in\s+range)",
-    }
+def _shannon_entropy(text: str) -> float:
+    if not text:
+        return 0.0
+    freq: dict = {}
+    for c in text:
+        freq[c] = freq.get(c, 0) + 1
+    n = len(text)
+    return -sum((f / n) * math.log2(f / n) for f in freq.values())
 
-    def __init__(self, language: str = "auto"):
-        """
-        Inicializa el extractor.
 
-        Args:
-            language: Lenguaje del código (python, java, auto)
-        """
-        self.language = language
-        logger.info(f"FeatureExtractor initialized for language: {language}")
+def _is_java(code: str) -> bool:
+    return bool(_PAT_JAVA_DETECT.search(code))
 
-    def _detect_language(self, code: str) -> str:
-        """Detecta el lenguaje del código."""
-        if "import " in code or "from " in code:
-            return "python"
-        if "import " in code or "class " in code or "public " in code:
-            return "java"
-        return "unknown"
 
-    def _count_tokens(self, code: str) -> int:
-        """Cuenta tokens en el código."""
-        # Tokenización simple: palabras, operadores, caracteres especiales
-        tokens = re.findall(r"\w+|[(){}\[\];:,.]|[+\-*/%=<>!&|^~]", code)
-        return len(tokens)
+def extraer_features_codigo(codigo: str) -> dict:
+    is_java = _is_java(codigo)
+    features: dict = {}
 
-    def _calculate_ast_depth(self, code: str, language: str = "python") -> int:
-        """
-        Calcula la profundidad del AST.
+    if is_java:
+        features["ast_depth"] = _ast_depth_brace(codigo)
+        features["ast_node_count"] = len(re.findall(
+            r'\b(new|if|for|while|switch|try|catch|return|throw|import|class|'
+            r'public|private|protected|void|int|String|boolean|static|final)\b', codigo)
+        ) + len(re.findall(r'\w+\s*\(', codigo))
+        features["ast_parse_error"] = 0
+        features["func_calls_count"] = len(re.findall(r'\w+\s*\(', codigo))
+        branch_nodes_jj = len(re.findall(r'\b(if|for|while|switch|case|catch)\b', codigo))
+        logical_ops = len(re.findall(r'&&|\|\|', codigo))
+        features["cyclomatic_complexity"] = branch_nodes_jj + logical_ops + 1
 
-        Returns:
-            Profundidad máxima del árbol sintáctico
-        """
-        if language == "python":
-            try:
-                tree = ast.parse(code)
-                return self._get_ast_depth(tree)
-            except SyntaxError:
-                logger.warning("Could not parse Python code for AST analysis")
-                return 0
-        elif language == "java":
-            # Para Java, usar heurística de llaves/corchetes anidados
-            max_depth = 0
-            current_depth = 0
-            for char in code:
-                if char in "{[":
-                    current_depth += 1
-                    max_depth = max(max_depth, current_depth)
-                elif char in "}]":
-                    current_depth = max(0, current_depth - 1)
-            return max_depth
-        else:
-            # Fallback genérico
-            return code.count("{") // 2
+        features["dangerous_func_calls"] = len(_PAT_DANGEROUS_JJ.findall(codigo))
+        features["subprocess_shell"] = 1 if _PAT_CMD_EXEC_JJ.search(codigo) else 0
+        features["subprocess_any"] = 1 if re.search(r'\bProcessBuilder\b', codigo, re.IGNORECASE) else 0
+        features["os_commands"] = 1 if _PAT_CMD_EXEC_JJ.search(codigo) or re.search(r'\bProcessBuilder\b', codigo, re.IGNORECASE) else 0
+        features["sql_raw_concat"] = 1 if _PAT_SQL_CONCAT_JJ.search(codigo) else 0
+        features["sql_fstring"] = 0  # Java no tiene f-strings
+        features["pickle_usage"] = 1 if _PAT_DESERIALIZATION_JJ.search(codigo) else 0
+        features["path_concat"] = 1 if _PAT_PATH_TRAVERSAL_JJ.search(codigo) else 0
+        features["weak_hash"] = 1 if _PAT_WEAK_CRYPTO_JJ.search(codigo) else 0
+        features["insecure_random"] = 1 if re.search(r'\bnew\s+java\.util\.Random\b', codigo) else 0
 
-    def _get_ast_depth(self, node: ast.AST, depth: int = 0) -> int:
-        """Calcula recursivamente la profundidad del AST."""
-        if not isinstance(node, ast.AST):
-            return depth
+        features["sanitization_present"] = 1 if _PAT_SANITIZATION.search(codigo) else 0
+        features["sql_parameterized"] = 1 if _PAT_SQL_PARAM.search(codigo) else 0
+        features["env_vars_used"] = 1 if _PAT_ENV_VARS.search(codigo) else 0
+        features["type_validation"] = 1 if _PAT_TYPE_VALID.search(codigo) else 0
+        features["exception_handling"] = 1 if _PAT_EXCEPTIONS.search(codigo) else 0
+        features["secure_imports"] = 1 if _PAT_SECURE_IMPORTS.search(codigo) else 0
 
-        max_depth = depth
-        for child in ast.iter_child_nodes(node):
-            child_depth = self._get_ast_depth(child, depth + 1)
-            max_depth = max(max_depth, child_depth)
+        features["raise_count"] = len(re.findall(r'\bthrow\b', codigo))
+    else:
+        try:
+            tree = ast.parse(codigo)
+            features["ast_depth"] = _ast_depth_py(tree)
+            features["ast_node_count"] = sum(1 for _ in ast.walk(tree))
+            features["ast_parse_error"] = 0
+            features["func_calls_count"] = sum(1 for node in ast.walk(tree) if isinstance(node, ast.Call))
+            branch_nodes = (ast.If, ast.For, ast.While, ast.Try, ast.ExceptHandler, ast.With, ast.Assert, ast.comprehension)
+            features["cyclomatic_complexity"] = sum(1 for node in ast.walk(tree) if isinstance(node, branch_nodes)) + 1
+        except SyntaxError:
+            features["ast_depth"] = 0
+            features["ast_node_count"] = 0
+            features["ast_parse_error"] = 1
+            features["func_calls_count"] = 0
+            features["cyclomatic_complexity"] = 1
 
-        return max_depth
+        features["dangerous_func_calls"] = len(_PAT_DANGEROUS_PY.findall(codigo))
+        features["subprocess_shell"] = 1 if _PAT_SUBPROCESS_SHELL_PY.search(codigo) else 0
+        features["subprocess_any"] = 1 if _PAT_SUBPROCESS_ANY_PY.search(codigo) else 0
+        features["os_commands"] = 1 if _PAT_OS_COMMANDS_PY.search(codigo) else 0
+        features["sql_raw_concat"] = 1 if _PAT_SQL_RAW_PY.search(codigo) else 0
+        features["sql_fstring"] = 1 if _PAT_SQL_FSTRING_PY.search(codigo) else 0
+        features["pickle_usage"] = 1 if re.search(r'\bpickle\.(loads|load|Unpickler)\s*\(', codigo, re.IGNORECASE) else 0
+        features["path_concat"] = 1 if _PAT_PATH_CONCAT_PY.search(codigo) else 0
+        features["weak_hash"] = 1 if _PAT_WEAK_HASH_PY.search(codigo) else 0
+        features["insecure_random"] = 1 if re.search(r'random\.(randint|random|choice|shuffle|sample)\s*\(', codigo, re.IGNORECASE) else 0
 
-    def _detect_dangerous_functions(self, code: str, language: str) -> tuple[int, dict]:
-        """
-        Detecta funciones peligrosas.
+        features["sanitization_present"] = 1 if _PAT_SANITIZATION.search(codigo) else 0
+        features["sql_parameterized"] = 1 if _PAT_SQL_PARAM.search(codigo) else 0
+        features["env_vars_used"] = 1 if _PAT_ENV_VARS.search(codigo) else 0
+        features["type_validation"] = 1 if _PAT_TYPE_VALID.search(codigo) else 0
+        features["exception_handling"] = 1 if _PAT_EXCEPTIONS.search(codigo) else 0
+        features["secure_imports"] = 1 if _PAT_SECURE_IMPORTS.search(codigo) else 0
 
-        Returns:
-            (count, details_dict)
-        """
-        count = 0
-        details = {}
+        features["raise_count"] = len(re.findall(r'\braise\b', codigo))
 
-        patterns = (
-            self.PYTHON_DANGEROUS_PATTERNS
-            if language == "python"
-            else self.JAVA_DANGEROUS_PATTERNS
-        )
+    features["shannon_entropy"] = _shannon_entropy(codigo)
+    features["lines_count"] = codigo.count("\n") + 1
+    features["string_concat_count"] = len(_PAT_STR_CONCAT.findall(codigo))
+    features["security_comments"] = len(_PAT_SEC_COMMENTS.findall(codigo))
+    features["secure_advanced"] = 1 if _PAT_SECURE_CRYPTO.search(codigo) else 0
 
-        for func_name, pattern in patterns.items():
-            matches = re.findall(pattern, code, re.IGNORECASE | re.MULTILINE)
-            if matches:
-                count += len(matches)
-                details[func_name] = len(matches)
+    features["total_danger_score"] = (
+        features["dangerous_func_calls"] * 3
+        + features["subprocess_shell"] * 3
+        + features["subprocess_any"] * 1
+        + features["os_commands"] * 2
+        + features["sql_raw_concat"] * 3
+        + features["sql_fstring"] * 3
+        + features["pickle_usage"] * 2
+        + features["path_concat"] * 2
+        + features["weak_hash"] * 1
+        + features["insecure_random"] * 1
+        + features["string_concat_count"] * 1
+    )
+    features["total_safety_score"] = (
+        features["sanitization_present"] * 3
+        + features["sql_parameterized"] * 3
+        + features["env_vars_used"] * 2
+        + features["type_validation"] * 2
+        + features["exception_handling"] * 1
+        + features["secure_imports"] * 3
+        + features["security_comments"] * 1
+        + features["raise_count"] * 1
+        + features.get("secure_advanced", 0) * 2
+    )
 
-        return count, details
-
-    def _detect_sanitization(self, code: str) -> bool:
-        """Detecta si hay sanitización."""
-        for pattern in self.SANITIZATION_PATTERNS.values():
-            if re.search(pattern, code, re.IGNORECASE):
-                return True
-        return False
-
-    def _detect_input_validation(self, code: str) -> bool:
-        """Detecta si hay validación de entrada."""
-        for pattern in self.VALIDATION_PATTERNS.values():
-            if re.search(pattern, code, re.IGNORECASE):
-                return True
-        return False
-
-    def _has_try_catch(self, code: str, language: str) -> bool:
-        """Detecta manejo de excepciones."""
-        if language == "python":
-            return bool(re.search(r"\btry\s*:|except\s+", code))
-        elif language == "java":
-            return bool(re.search(r"\btry\s*\{|catch\s*\(", code))
-        return bool(re.search(r"try|catch|except", code, re.IGNORECASE))
-
-    def extract(self, code: str, language: Optional[str] = None) -> CodeFeatures:
-        """
-        Extrae todas las características del código.
-
-        Args:
-            code: Código fuente
-            language: Lenguaje (python/java/auto)
-
-        Returns:
-            CodeFeatures con todas las métricas
-        """
-        if not code or not code.strip():
-            logger.warning("Empty code provided")
-            return CodeFeatures(
-                token_count=0,
-                ast_depth=0,
-                has_eval=False,
-                has_exec=False,
-                has_sql_concat=False,
-                has_os_system=False,
-                has_subprocess=False,
-                has_runtime_exec=False,
-                has_processbuilder=False,
-                has_input_validation=False,
-                has_sanitization=False,
-                has_try_catch=False,
-                lines_of_code=0,
-                dangerous_functions_count=0,
-            )
-
-        # Detectar lenguaje si es necesario
-        lang = language or self.language
-        if lang == "auto":
-            lang = self._detect_language(code)
-
-        logger.debug(f"Analyzing code in language: {lang}")
-
-        # Contar métricas básicas
-        token_count = self._count_tokens(code)
-        ast_depth = self._calculate_ast_depth(code, lang)
-        lines_of_code = len(code.split("\n"))
-
-        # Detectar funciones peligrosas
-        dangerous_count, dangerous_details = self._detect_dangerous_functions(
-            code, lang
-        )
-
-        # Detectar características de seguridad
-        has_eval = "eval" in dangerous_details
-        has_exec = "exec" in dangerous_details
-        has_sql_concat = "sql_concat" in dangerous_details
-        has_os_system = "os_system" in dangerous_details
-        has_subprocess = "subprocess_popen" in dangerous_details
-        has_runtime_exec = "runtime_exec" in dangerous_details
-        has_processbuilder = "processbuilder" in dangerous_details
-
-        has_sanitization = self._detect_sanitization(code)
-        has_input_validation = self._detect_input_validation(code)
-        has_try_catch = self._has_try_catch(code, lang)
-
-        features = CodeFeatures(
-            token_count=token_count,
-            ast_depth=ast_depth,
-            has_eval=has_eval,
-            has_exec=has_exec,
-            has_sql_concat=has_sql_concat,
-            has_os_system=has_os_system,
-            has_subprocess=has_subprocess,
-            has_runtime_exec=has_runtime_exec,
-            has_processbuilder=has_processbuilder,
-            has_input_validation=has_input_validation,
-            has_sanitization=has_sanitization,
-            has_try_catch=has_try_catch,
-            lines_of_code=lines_of_code,
-            dangerous_functions_count=dangerous_count,
-        )
-
-        logger.debug(f"Features extracted: {dangerous_count} dangerous patterns found")
-        return features
-
-    def extract_batch(self, code_fragments: list[dict]) -> list[dict]:
-        """
-        Extrae features para múltiples fragmentos.
-
-        Args:
-            code_fragments: Lista de {'code': str, 'file': str, 'line': int}
-
-        Returns:
-            Lista de {'file': str, 'line': int, 'features': dict}
-        """
-        results = []
-
-        for fragment in code_fragments:
-            code = fragment.get("code", "")
-            file = fragment.get("file", "unknown")
-            line = fragment.get("line", 0)
-
-            try:
-                features = self.extract(code)
-                results.append(
-                    {"file": file, "line": line, "features": features.to_dict()}
-                )
-            except Exception as e:
-                logger.error(f"Error extracting features from {file}:{line}: {e}")
-                results.append(
-                    {
-                        "file": file,
-                        "line": line,
-                        "error": str(e),
-                        "features": None,
-                    }
-                )
-
-        return results
+    return features
 
 
 def main():
-    """Función principal para testing."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-    # Ejemplo Python
-    python_code = """
-import os
-user_input = input("Enter query: ")
-query = "SELECT * FROM users WHERE id = " + user_input
-result = eval(user_input)
-"""
-
-    extractor = FeatureExtractor(language="auto")
-    features = extractor.extract(python_code, language="python")
-    print("Python Code Features:")
-    print(features.to_dict())
+    test_cases = [
+        ("SQL Injection (vuln)", 'String q = "SELECT * FROM users WHERE id = " + request.getParameter("id");\nStatement stmt = conn.createStatement();\nResultSet rs = stmt.executeQuery(q);\n'),
+        ("SQL Safe", 'String q = "SELECT * FROM users WHERE id = ?";\nPreparedStatement stmt = conn.prepareStatement(q);\nstmt.setInt(1, userId);\n'),
+        ("Runtime exec", 'Runtime rt = Runtime.getRuntime();\nProcess p = rt.exec("cmd /c " + input);\n'),
+        ("Crypto weak", 'MessageDigest md = MessageDigest.getInstance("MD5");\nmd.digest(data);\n'),
+        ("Deserialization", 'FileInputStream fis = new FileInputStream("data.ser");\nObjectInputStream ois = new ObjectInputStream(fis);\nObject obj = ois.readObject();\n'),
+    ]
+    for name, code in test_cases:
+        feats = extraer_features_codigo(code)
+        print(f"\n=== {name} ===")
+        for k, v in sorted(feats.items()):
+            print(f"  {k}: {v}")
 
 
 if __name__ == "__main__":
