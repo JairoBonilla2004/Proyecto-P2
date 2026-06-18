@@ -37,10 +37,4 @@ public class AuthController {
         TokenResponse token = authService.login(request);
         return ResponseEntity.ok(ApiResponse.ok(token));
     }
-
-    // 🚨 TEST: Código deliberadamente vulnerable para probar el pipeline
-    private void checkUserByEmail(String email) {
-        String query = "SELECT * FROM users WHERE email = '" + email + "'";
-        // SQL Injection intencional — el pipeline lo detectará como VULNERABLE
-    }
 }
