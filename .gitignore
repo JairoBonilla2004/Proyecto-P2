@@ -25,3 +25,6 @@ __pycache__/
 
 #archivos env
 .env
+
+# Ignorar el dataset original de Juliet
+modelo/Juliet_Java
