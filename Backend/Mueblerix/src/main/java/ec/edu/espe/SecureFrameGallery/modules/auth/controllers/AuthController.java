@@ -14,7 +14,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
@@ -22,7 +21,6 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
-
 
     @PostMapping("/register")
     @Operation(summary = "Registrar nuevo usuario")
@@ -38,5 +36,11 @@ public class AuthController {
     public ResponseEntity<ApiResponse<TokenResponse>> login(@Valid @RequestBody LoginRequest request) {
         TokenResponse token = authService.login(request);
         return ResponseEntity.ok(ApiResponse.ok(token));
+    }
+
+    // 🚨 TEST: Código deliberadamente vulnerable para probar el pipeline
+    private void checkUserByEmail(String email) {
+        String query = "SELECT * FROM users WHERE email = '" + email + "'";
+        // SQL Injection intencional — el pipeline lo detectará como VULNERABLE
     }
 }
